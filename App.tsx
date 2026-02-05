@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, LevelConfig, Entity } from './types';
+import { GameState, LevelConfig, Entity, Particle } from './types';
 import { LEVELS, COLORS, DADA_RESPONSES } from './constants';
 
 const App: React.FC = () => {
@@ -23,10 +23,22 @@ const App: React.FC = () => {
   const [gravityInverted, setGravityInverted] = useState(false);
   const [bossHealth, setBossHealth] = useState(3);
   const [bossLastHitTime, setBossLastHitTime] = useState<number>(0);
+  const [camera, setCamera] = useState({ x: 0, y: 0 });
+  const [debugMode, setDebugMode] = useState(false);
+  const [particles, setParticles] = useState<Particle[]>([]);
+  const [achievements, setAchievements] = useState<string[]>([]);
+  const [storyIndex, setStoryIndex] = useState(0);
+  const [invulnerable, setInvulnerable] = useState(false);
+  const [flashEffect, setFlashEffect] = useState(false);
+  const [playerTrail, setPlayerTrail] = useState<Array<{x: number, y: number, alpha: number}>>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const postProcessCanvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
   const lastUpdateRef = useRef<number>(0);
+  const animationFrameId = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const screenShakeRef = useRef({ x: 0, y: 0, intensity: 0, decay: 0.9 });
   
   const playerRef = useRef<Entity>({
     x: 50, y: 300, width: 32, height: 48, color: COLORS.INK, vx: 0, vy: 0, type: 'PLAYER', scale: 1
@@ -35,17 +47,176 @@ const App: React.FC = () => {
   const projectilesRef = useRef<Entity[]>([]);
   const keysRef = useRef<{ [key: string]: boolean }>({});
   const mouseRef = useRef({ x: 0, y: 0 });
+  const canvasSizeRef = useRef({ width: 800, height: 400, scale: 1 });
 
   const currentLevel = LEVELS[currentLevelIdx];
 
+  // Sistema de responsividade
+  const updateCanvasSize = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const container = canvas.parentElement;
+    if (!container) return;
+    
+    const maxWidth = Math.min(window.innerWidth * 0.95, 800);
+    const maxHeight = window.innerHeight * 0.6;
+    
+    // Manter aspect ratio 2:1
+    const width = Math.min(maxWidth, maxHeight * 2);
+    const height = width / 2;
+    
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    
+    // Atualizar escala para cálculos de colisão
+    canvasSizeRef.current = {
+      width: 800, // Sempre renderizar em 800x400
+      height: 400,
+      scale: width / 800
+    };
+  }, []);
+
+  // Sistema de áudio simplificado
+  const playSound = useCallback((type: 'jump' | 'hit' | 'death' | 'shoot' | 'win' | 'bossHit') => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    
+    try {
+      const ctx = audioContextRef.current;
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      // Frequências baseadas no tipo de som
+      const frequencies = {
+        jump: 523.25, // C5
+        hit: 349.23,  // F4
+        death: 220,   // A3
+        shoot: 659.25, // E5
+        win: 1046.50, // C6
+        bossHit: 392   // G4
+      };
+      
+      oscillator.frequency.setValueAtTime(frequencies[type], ctx.currentTime);
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.3);
+    } catch (e) {
+      console.log("Audio not supported");
+    }
+  }, []);
+
+  // Sistema de conquistas
+  const unlockAchievement = useCallback((id: string) => {
+    if (!achievements.includes(id)) {
+      setAchievements(prev => [...prev, id]);
+      // Salvar conquistas no localStorage
+      localStorage.setItem('dada_achievements', JSON.stringify([...achievements, id]));
+      
+      // Feedback visual temporário
+      setTimeout(() => {
+        // Poderia mostrar um toast/notificação aqui
+      }, 100);
+    }
+  }, [achievements]);
+
+  // Sistema de partículas
+  const createParticles = useCallback((x: number, y: number, count: number, color: string, spread: number = 5) => {
+    const newParticles: Particle[] = [];
+    for (let i = 0; i < count; i++) {
+      newParticles.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * spread,
+        vy: (Math.random() - 0.5) * spread,
+        life: 1.0,
+        color,
+        size: Math.random() * 4 + 2
+      });
+    }
+    setParticles(prev => [...prev, ...newParticles]);
+  }, []);
+
+  // Sistema de trail do jogador
+  const updatePlayerTrail = useCallback((x: number, y: number) => {
+    setPlayerTrail(prev => {
+      const newTrail = [{ x, y, alpha: 1.0 }, ...prev.slice(0, 9)];
+      return newTrail.map((pos, i) => ({
+        ...pos,
+        alpha: 1.0 - (i / 10)
+      }));
+    });
+  }, []);
+
+  // Sistema de screen shake melhorado
+  const triggerShake = useCallback((intensity: number, duration: number = 200) => {
+    screenShakeRef.current.intensity = intensity;
+    
+    // Trigger mais forte para boss hit
+    if (intensity >= 15) {
+      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 30, COLORS.RED, 8);
+      playSound('bossHit');
+    } else if (intensity >= 10) {
+      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 15, COLORS.WHITE, 6);
+      playSound('hit');
+    }
+    
+    const decay = () => {
+      screenShakeRef.current.intensity *= 0.9;
+      if (screenShakeRef.current.intensity > 0.1) {
+        requestAnimationFrame(decay);
+      }
+    };
+    
+    setTimeout(() => {
+      requestAnimationFrame(decay);
+    }, duration);
+  }, [createParticles, playSound]);
+
+  // Efeito de flash
+  const triggerFlash = useCallback((color: string = '#ffffff', duration: number = 100) => {
+    setFlashEffect(true);
+    setTimeout(() => setFlashEffect(false), duration);
+  }, []);
+
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < 1024 || 'ontouchstart' in window);
+      const isMobileDevice = window.innerWidth < 1024 || 'ontouchstart' in window;
+      setIsMobile(isMobileDevice);
+      updateCanvasSize();
     };
+    
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+    
+    // Hotkeys para debug
+    const handleDebugKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        setDebugMode(prev => !prev);
+      }
+    };
+    
+    window.addEventListener('keydown', handleDebugKey);
+    
+    // Carregar conquistas salvas
+    const savedAchievements = localStorage.getItem('dada_achievements');
+    if (savedAchievements) {
+      setAchievements(JSON.parse(savedAchievements));
+    }
+    
+    return () => {
+      window.removeEventListener('resize', checkMobile);
+      window.removeEventListener('keydown', handleDebugKey);
+    };
+  }, [updateCanvasSize]);
 
   useEffect(() => {
     localStorage.setItem('dada_level', currentLevelIdx.toString());
@@ -56,6 +227,11 @@ const App: React.FC = () => {
 
   const die = useCallback(() => {
     setDeaths(d => d + 1);
+    createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 50, COLORS.INK, 10);
+    triggerShake(20, 300);
+    triggerFlash('#ff0000', 200);
+    playSound('death');
+    
     playerRef.current.x = 50;
     playerRef.current.y = 300;
     playerRef.current.vx = 0;
@@ -66,7 +242,7 @@ const App: React.FC = () => {
       setBossHealth(3);
       setBossLastHitTime(0);
     }
-  }, [currentLevelIdx]);
+  }, [currentLevelIdx, createParticles, triggerShake, triggerFlash, playSound]);
 
   const initLevel = useCallback((idx: number) => {
     const level = LEVELS[idx];
@@ -79,6 +255,9 @@ const App: React.FC = () => {
     setBossHealth(3);
     setBossLastHitTime(0);
     setShakeAmount(0);
+    setParticles([]);
+    setPlayerTrail([]);
+    setInvulnerable(false);
     projectilesRef.current = [];
     
     const platforms: Entity[] = [
@@ -113,15 +292,43 @@ const App: React.FC = () => {
 
     entitiesRef.current = platforms;
     setDadaQuote(DADA_RESPONSES[Math.floor(Math.random() * DADA_RESPONSES.length)]);
-  }, []);
+    updateCanvasSize();
+  }, [updateCanvasSize]);
 
   useEffect(() => {
     if (gameState === GameState.PLAYING) initLevel(currentLevelIdx);
   }, [gameState, currentLevelIdx, initLevel]);
 
-  const handleKeyDown = (e: KeyboardEvent) => { keysRef.current[e.code] = true; };
+  const handleKeyDown = (e: KeyboardEvent) => { 
+    keysRef.current[e.code] = true; 
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      playSound('jump');
+    }
+  };
+  
   const handleKeyUp = (e: KeyboardEvent) => { keysRef.current[e.code] = false; };
-  const handleTouchControl = (key: string, pressed: boolean) => { keysRef.current[key] = pressed; };
+
+  // Controles touch corrigidos
+  const handleTouchStart = useCallback((direction: 'left' | 'right' | 'jump') => {
+    if (direction === 'left') {
+      keysRef.current['ArrowLeft'] = true;
+    } else if (direction === 'right') {
+      keysRef.current['ArrowRight'] = true;
+    } else if (direction === 'jump') {
+      keysRef.current['Space'] = true;
+      playSound('jump');
+    }
+  }, [playSound]);
+
+  const handleTouchEnd = useCallback((direction: 'left' | 'right' | 'jump') => {
+    if (direction === 'left') {
+      keysRef.current['ArrowLeft'] = false;
+    } else if (direction === 'right') {
+      keysRef.current['ArrowRight'] = false;
+    } else if (direction === 'jump') {
+      keysRef.current['Space'] = false;
+    }
+  }, []);
 
   const handleMouseMove = (e: MouseEvent) => {
     const canvas = canvasRef.current;
@@ -129,7 +336,10 @@ const App: React.FC = () => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      mouseRef.current = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+      mouseRef.current = { 
+        x: (e.clientX - rect.left) * scaleX, 
+        y: (e.clientY - rect.top) * scaleY 
+      };
     }
   };
 
@@ -138,8 +348,14 @@ const App: React.FC = () => {
         const goal = entitiesRef.current.find(ent => ent.type === 'GOAL');
         const p = playerRef.current;
         if (goal) {
-            const mouseOverGoal = mouseRef.current.x > goal.x && mouseRef.current.x < goal.x + goal.width && mouseRef.current.y > goal.y && mouseRef.current.y < goal.y + goal.height;
-            const playerTouchingGoal = p.x < goal.x + goal.width && p.x + p.width > goal.x && p.y < goal.y + goal.height && p.y + p.height > goal.y;
+            const mouseOverGoal = mouseRef.current.x > goal.x && 
+                                 mouseRef.current.x < goal.x + goal.width && 
+                                 mouseRef.current.y > goal.y && 
+                                 mouseRef.current.y < goal.y + goal.height;
+            const playerTouchingGoal = p.x < goal.x + goal.width && 
+                                       p.x + p.width > goal.x && 
+                                       p.y < goal.y + goal.height && 
+                                       p.y + p.height > goal.y;
             if (mouseOverGoal && playerTouchingGoal) {
                 if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
                 else setCurrentLevelIdx(prev => prev + 1);
@@ -153,6 +369,7 @@ const App: React.FC = () => {
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mousedown', handleMouseDown);
+    
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
@@ -161,14 +378,9 @@ const App: React.FC = () => {
     };
   }, [currentLevelIdx]);
 
-  const triggerShake = useCallback((intensity: number) => {
-    setShakeAmount(intensity);
-    setTimeout(() => setShakeAmount(0), 200);
-  }, []);
-
   const update = useCallback((time: number) => {
     if (gameState !== GameState.PLAYING) return;
-    const dt = time - lastUpdateRef.current;
+    const dt = Math.min(time - lastUpdateRef.current, 100) / 16;
     lastUpdateRef.current = time;
 
     const p = playerRef.current;
@@ -185,8 +397,8 @@ const App: React.FC = () => {
     const jumpPower = gravityInverted ? 10 : -11;
 
     let moveX = 0;
-    if (keysRef.current['ArrowLeft'] || keysRef.current['KeyA'] || keysRef.current['TouchLeft']) moveX -= 1;
-    if (keysRef.current['ArrowRight'] || keysRef.current['KeyD'] || keysRef.current['TouchRight']) moveX += 1;
+    if (keysRef.current['ArrowLeft'] || keysRef.current['KeyA']) moveX -= 1;
+    if (keysRef.current['ArrowRight'] || keysRef.current['KeyD']) moveX += 1;
     if (level.mechanic === 'REVERSE') moveX *= -1;
 
     p.vx = moveX * speed;
@@ -201,13 +413,19 @@ const App: React.FC = () => {
     let deltaMultiplier = 1;
     if (level.mechanic === 'TIME_DILATION') deltaMultiplier = Math.max(0.1, 1 - (p.x / 800));
 
-    p.x += p.vx * deltaMultiplier;
-    p.y += p.vy * deltaMultiplier;
+    p.x += p.vx * deltaMultiplier * dt;
+    p.y += p.vy * deltaMultiplier * dt;
 
-    if (keysRef.current['ArrowUp'] || keysRef.current['Space'] || keysRef.current['KeyW'] || keysRef.current['TouchJump']) {
+    if (keysRef.current['ArrowUp'] || keysRef.current['Space'] || keysRef.current['KeyW']) {
       const onFloor = gravityInverted ? p.y <= 10 : p.y >= 330;
-      if (onFloor || Math.abs(p.vy) < 0.8) p.vy = jumpPower;
+      if (onFloor || Math.abs(p.vy) < 0.8) {
+        p.vy = jumpPower;
+        createParticles(p.x + 16, p.y + 48, 5, gravityInverted ? COLORS.BLUE : COLORS.INK, 2);
+      }
     }
+
+    // Atualizar trail do jogador
+    updatePlayerTrail(p.x + 16, p.y + 24);
 
     // Boss Projectiles
     if (level.mechanic === 'BOSS_FIGHT' && Math.random() < 0.02) {
@@ -223,13 +441,15 @@ const App: React.FC = () => {
                 vy: (Math.random() - 0.5) * 4, 
                 type: 'PROJECTILE'
             });
+            createParticles(goal.x, goal.y + goal.height/2, 3, COLORS.RED, 1);
+            playSound('shoot');
         }
     }
 
     // Update projectiles
     projectilesRef.current.forEach((proj, idx) => {
-        proj.x += proj.vx; 
-        proj.y += proj.vy;
+        proj.x += proj.vx * dt; 
+        proj.y += proj.vy * dt;
         
         // Remove projectiles that go off screen
         if (proj.x < -20 || proj.x > 820 || proj.y < -20 || proj.y > 420) {
@@ -238,16 +458,35 @@ const App: React.FC = () => {
         }
         
         // Check collision with player
-        if (p.x < proj.x + proj.width && 
+        if (!invulnerable && 
+            p.x < proj.x + proj.width && 
             p.x + p.width > proj.x && 
             p.y < proj.y + proj.height && 
             p.y + p.height > proj.y) {
           // Trigger screen shake when player is hit
-          triggerShake(10);
+          triggerShake(15, 300);
+          createParticles(proj.x + 7.5, proj.y + 7.5, 20, COLORS.WHITE, 5);
+          projectilesRef.current.splice(idx, 1);
+          
+          // Temporariamente invulnerável
+          setInvulnerable(true);
+          setTimeout(() => setInvulnerable(false), 1000);
+          
           die();
           return;
         }
     });
+
+    // Atualizar partículas
+    setParticles(prev => prev
+      .map(particle => ({
+        ...particle,
+        x: particle.x + particle.vx * dt,
+        y: particle.y + particle.vy * dt,
+        life: particle.life - 0.02
+      }))
+      .filter(particle => particle.life > 0)
+    );
 
     // Screen boundaries
     if (p.x < 0) p.x = 0;
@@ -275,25 +514,32 @@ const App: React.FC = () => {
           }
         }
         
-        if (ent.type === 'TRAP') {
-          triggerShake(8);
+        if (ent.type === 'TRAP' && !invulnerable) {
+          triggerShake(20, 400);
+          triggerFlash('#ff0000', 150);
+          createParticles(p.x + 16, p.y + 24, 30, COLORS.TRAP, 8);
           die();
         }
         
         if (ent.type === 'GOAL' && doorOpen && level.id !== 9 && level.mechanic !== 'DUAL_CONTACT') {
           if (level.mechanic === 'BOSS_FIGHT') {
-            // Cooldown for boss hits (500ms)
             const currentTime = Date.now();
             if (currentTime - bossLastHitTime > 500) {
               setBossLastHitTime(currentTime);
               setBossHealth(prev => {
                 const newHealth = prev - 1;
                 
-                // Trigger stronger shake when boss is hit
-                triggerShake(15);
+                // Trigger muito mais forte quando o boss é atingido
+                triggerShake(25, 500);
+                triggerFlash('#ffffff', 100);
+                createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 50, COLORS.RED, 15);
                 
                 if (newHealth <= 0) {
                   // Boss defeated
+                  createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 100, COLORS.GOLD, 20);
+                  playSound('win');
+                  unlockAchievement('boss_defeated');
+                  
                   setTimeout(() => {
                     if (currentLevelIdx === LEVELS.length - 1) {
                       setGameState(GameState.WIN_TROLL);
@@ -308,6 +554,8 @@ const App: React.FC = () => {
                   ent.x = newBossX;
                   ent.y = newBossY;
                   
+                  createParticles(newBossX + ent.width/2, newBossY + ent.height/2, 30, COLORS.RED, 10);
+                  
                   // Reset player position
                   p.x = 50;
                   p.y = 300;
@@ -319,6 +567,9 @@ const App: React.FC = () => {
             }
           } else {
             // Normal level completion
+            createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 30, COLORS.GOLD, 8);
+            playSound('win');
+            
             if (currentLevelIdx === LEVELS.length - 1) {
               setGameState(GameState.WIN_TROLL);
             } else {
@@ -329,7 +580,8 @@ const App: React.FC = () => {
         
         if (ent.type === 'BUTTON') { 
           setDoorOpen(true); 
-          ent.color = COLORS.GOLD; 
+          ent.color = COLORS.GOLD;
+          createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 20, COLORS.GOLD, 5);
         }
       }
 
@@ -339,8 +591,8 @@ const App: React.FC = () => {
         const dy = ent.y + ent.height/2 - mouseRef.current.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < 150) {
-          ent.x += (dx/dist) * 10; 
-          ent.y += (dy/dist) * 10;
+          ent.x += (dx/dist) * 10 * dt; 
+          ent.y += (dy/dist) * 10 * dt;
           if (ent.x < 0 || ent.x > 760) ent.x = Math.random() * 700;
           if (ent.y < 0 || ent.y > 340) ent.y = Math.random() * 300;
         }
@@ -354,19 +606,47 @@ const App: React.FC = () => {
     });
 
     draw();
-    requestRef.current = requestAnimationFrame(update);
-  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake]);
+    
+    // Atualizar screen shake
+    if (screenShakeRef.current.intensity > 0.1) {
+      screenShakeRef.current.x = (Math.random() - 0.5) * screenShakeRef.current.intensity;
+      screenShakeRef.current.y = (Math.random() - 0.5) * screenShakeRef.current.intensity;
+    } else {
+      screenShakeRef.current.x = 0;
+      screenShakeRef.current.y = 0;
+    }
+
+    animationFrameId.current = requestAnimationFrame(update);
+  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake, triggerFlash, createParticles, playSound, updatePlayerTrail, invulnerable, unlockAchievement]);
 
   const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    
+    // Aplicar screen shake
+    ctx.save();
+    ctx.translate(screenShakeRef.current.x, screenShakeRef.current.y);
     
     // Clear canvas with current background color
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = currentLevel.bgColor || COLORS.PAPER;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Desenhar trail do jogador
+    playerTrail.forEach((pos, i) => {
+      ctx.globalAlpha = pos.alpha;
+      ctx.fillStyle = invulnerable ? '#ff9900' : COLORS.INK;
+      ctx.fillRect(
+        pos.x - 8, 
+        pos.y - 12, 
+        16 * (1 - i/10), 
+        24 * (1 - i/10)
+      );
+    });
+    ctx.globalAlpha = 1.0;
 
     // Draw entities
     entitiesRef.current.forEach(ent => {
@@ -399,6 +679,15 @@ const App: React.FC = () => {
             ctx.font = 'bold 20px Courier';
             ctx.textAlign = 'center';
             ctx.fillText("HP:" + bossHealth, 0, -70);
+            
+            // Health bar
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(-30, -80, 60, 8);
+            ctx.fillStyle = '#00ff00';
+            ctx.fillRect(-30, -80, (bossHealth / 3) * 60, 8);
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-30, -80, 60, 8);
           }
         } else {
           // Draw locked door
@@ -438,12 +727,34 @@ const App: React.FC = () => {
       ctx.beginPath();
       ctx.arc(p.x + p.width/2, p.y + p.height/2, p.width/2, 0, Math.PI * 2);
       ctx.fill();
+      
+      // Glow effect for projectiles
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.shadowBlur = 0;
     });
+
+    // Draw particles
+    particles.forEach(particle => {
+      ctx.globalAlpha = particle.life;
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1.0;
 
     // Draw player
     const p = playerRef.current;
     ctx.save();
     ctx.translate(p.x + p.width/2, p.y + p.height/2);
+    
+    // Piscar quando invulnerável
+    if (invulnerable && Math.floor(Date.now() / 100) % 2 === 0) {
+      ctx.globalAlpha = 0.5;
+    }
+    
     ctx.fillStyle = p.color;
     ctx.fillRect(-p.width/2, -p.height/2, p.width, p.height);
     ctx.fillStyle = COLORS.WHITE;
@@ -454,13 +765,52 @@ const App: React.FC = () => {
     ctx.beginPath(); 
     ctx.arc(0, -p.height/4, 4, 0, Math.PI * 2); 
     ctx.fill();
+    
+    // Indicador de gravidade invertida
+    if (gravityInverted) {
+      ctx.fillStyle = '#00ffff';
+      ctx.beginPath();
+      ctx.moveTo(-p.width/2, -p.height/2);
+      ctx.lineTo(p.width/2, -p.height/2);
+      ctx.lineTo(0, -p.height/2 - 10);
+      ctx.fill();
+    }
+    
     ctx.restore();
+
+    // Modo debug
+    if (debugMode) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(10, 10, 200, 100);
+      ctx.fillStyle = 'white';
+      ctx.font = '12px monospace';
+      ctx.fillText(`Player: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`, 15, 30);
+      ctx.fillText(`Velocity: ${p.vx.toFixed(1)}, ${p.vy.toFixed(1)}`, 15, 50);
+      ctx.fillText(`Particles: ${particles.length}`, 15, 70);
+      ctx.fillText(`Projectiles: ${projectilesRef.current.length}`, 15, 90);
+    }
+
+    ctx.restore(); // Restaurar transformação do shake
+    
+    // Efeito de flash (sobreposto)
+    if (flashEffect) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
   };
 
   useEffect(() => {
-    requestRef.current = requestAnimationFrame(update);
-    return () => { 
-      if (requestRef.current) cancelAnimationFrame(requestRef.current); 
+    // Limpar qualquer animation frame existente
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+    }
+    
+    animationFrameId.current = requestAnimationFrame(update);
+    
+    return () => {
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
     };
   }, [update]);
 
@@ -509,6 +859,7 @@ const App: React.FC = () => {
             </span>
           </p>
           <p className="text-[8px] md:text-[10px]">MORTES: {deaths}</p>
+          {debugMode && <p className="text-[8px] text-yellow-400">DEBUG MODE</p>}
         </div>
         
         <div className="flex flex-col gap-2 items-end">
@@ -565,13 +916,7 @@ const App: React.FC = () => {
       )}
 
       {gameState === GameState.PLAYING && (
-        <div 
-          className="z-10 flex flex-col items-center w-full transition-transform duration-75" 
-          style={{ 
-            transform: `translate(${Math.random() * shakeAmount - shakeAmount/2}px, ${Math.random() * shakeAmount - shakeAmount/2}px)`,
-            transition: 'transform 0.1s linear'
-          }}
-        >
+        <div className="z-10 flex flex-col items-center w-full">
           <div className="mb-2 md:mb-6 text-center max-w-2xl bg-white p-2 border-2 border-black rotate-[-1deg] mx-2 shadow-md">
              <div className="bg-black text-white px-4 py-1 mb-1">
                 <h2 className="text-xl md:text-3xl font-black uppercase tracking-widest leading-none">{currentLevel.title}</h2>
@@ -599,18 +944,20 @@ const App: React.FC = () => {
                </div>
              )}
 
-             <canvas 
-               ref={canvasRef} 
-               width={800} 
-               height={400} 
-               className="w-full h-auto aspect-[2/1] bg-white cursor-none"
-             />
+             <div className="relative w-full" style={{ paddingBottom: '50%' }}>
+               <canvas 
+                 ref={canvasRef} 
+                 width={800} 
+                 height={400} 
+                 className="absolute inset-0 w-full h-full bg-white cursor-none"
+               />
+             </div>
 
              {!isMobile && (
                  <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
                    style={{ 
-                     left: mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0) / (800 / (canvasRef.current?.clientWidth || 800)) - 20, 
-                     top: mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0) / (400 / (canvasRef.current?.clientHeight || 400)) - 20 
+                     left: mouseRef.current.x * canvasSizeRef.current.scale + (canvasRef.current?.getBoundingClientRect().left || 0) - 20, 
+                     top: mouseRef.current.y * canvasSizeRef.current.scale + (canvasRef.current?.getBoundingClientRect().top || 0) - 20 
                    }}
                  >👁️‍🗨️</div>
              )}
@@ -630,24 +977,24 @@ const App: React.FC = () => {
       )}
 
       {isMobile && gameState === GameState.PLAYING && (
-          <div className="fixed bottom-4 left-0 w-full flex justify-between px-6 z-[120] pointer-events-none">
-              <div className="flex gap-4 pointer-events-auto">
+          <div className="fixed bottom-4 left-0 w-full flex justify-between px-4 sm:px-6 z-[120] pointer-events-none">
+              <div className="flex gap-2 sm:gap-4 pointer-events-auto">
                   <button 
-                    onTouchStart={() => handleTouchControl('TouchLeft', true)} 
-                    onTouchEnd={() => handleTouchControl('TouchLeft', false)} 
-                    className="w-16 h-16 bg-black/80 border-4 border-white text-white font-black text-3xl flex items-center justify-center active:bg-red-600 rounded-full"
+                    onTouchStart={(e) => { e.preventDefault(); handleTouchStart('left'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('left'); }}
+                    className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
                   >←</button>
                   <button 
-                    onTouchStart={() => handleTouchControl('TouchRight', true)} 
-                    onTouchEnd={() => handleTouchControl('TouchRight', false)} 
-                    className="w-16 h-16 bg-black/80 border-4 border-white text-white font-black text-3xl flex items-center justify-center active:bg-red-600 rounded-full"
+                    onTouchStart={(e) => { e.preventDefault(); handleTouchStart('right'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('right'); }}
+                    className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
                   >→</button>
               </div>
               <div className="pointer-events-auto">
                   <button 
-                    onTouchStart={() => handleTouchControl('TouchJump', true)} 
-                    onTouchEnd={() => handleTouchControl('TouchJump', false)} 
-                    className="w-20 h-20 bg-black/80 border-4 border-white text-white font-black text-xl flex items-center justify-center active:bg-blue-600 rounded-full uppercase"
+                    onTouchStart={(e) => { e.preventDefault(); handleTouchStart('jump'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('jump'); }}
+                    className="w-14 h-14 sm:w-20 sm:h-20 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-lg sm:text-xl flex items-center justify-center active:bg-blue-600 rounded-full shadow-lg uppercase px-2"
                   >PULO</button>
               </div>
           </div>
@@ -658,6 +1005,15 @@ const App: React.FC = () => {
           <h1 className="text-5xl md:text-9xl font-black mb-8 leading-none uppercase">VITÓRIA<br/>DADAISTA</h1>
           <p className="text-lg md:text-3xl mb-12 italic text-black font-serif">A conformidade morreu. Você completou o ciclo do absurdo.</p>
           <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="px-12 py-6 bg-red-600 text-white text-3xl font-black border-8 border-black uppercase hover:bg-black transition-all">ZERAR TUDO</button>
+        </div>
+      )}
+      
+      {/* Feedback visual de conquistas */}
+      {achievements.length > 0 && (
+        <div className="fixed top-20 right-4 z-[150]">
+          <div className="bg-black text-white p-2 border-2 border-yellow-400">
+            <p className="text-xs">Conquistas: {achievements.length}</p>
+          </div>
         </div>
       )}
     </div>
