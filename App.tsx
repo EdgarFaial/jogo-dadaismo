@@ -1,6 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, LevelConfig, Entity, Particle } from './types';
+import { GameState, Entity } from './types';
 import { LEVELS, COLORS, DADA_RESPONSES } from './constants';
+
+// Interfaces adicionais
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  color: string;
+  size: number;
+}
+
+interface ScreenShake {
+  x: number;
+  y: number;
+  intensity: number;
+}
 
 const App: React.FC = () => {
   // Persistence
@@ -23,22 +40,19 @@ const App: React.FC = () => {
   const [gravityInverted, setGravityInverted] = useState(false);
   const [bossHealth, setBossHealth] = useState(3);
   const [bossLastHitTime, setBossLastHitTime] = useState<number>(0);
-  const [camera, setCamera] = useState({ x: 0, y: 0 });
-  const [debugMode, setDebugMode] = useState(false);
   const [particles, setParticles] = useState<Particle[]>([]);
   const [achievements, setAchievements] = useState<string[]>([]);
-  const [storyIndex, setStoryIndex] = useState(0);
   const [invulnerable, setInvulnerable] = useState(false);
   const [flashEffect, setFlashEffect] = useState(false);
   const [playerTrail, setPlayerTrail] = useState<Array<{x: number, y: number, alpha: number}>>([]);
+  const [showAchievement, setShowAchievement] = useState<string | null>(null);
+  const [achievementTimeout, setAchievementTimeout] = useState<NodeJS.Timeout | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const postProcessCanvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
   const lastUpdateRef = useRef<number>(0);
-  const animationFrameId = useRef<number | null>(null);
+  const screenShakeRef = useRef<ScreenShake>({ x: 0, y: 0, intensity: 0 });
   const audioContextRef = useRef<AudioContext | null>(null);
-  const screenShakeRef = useRef({ x: 0, y: 0, intensity: 0, decay: 0.9 });
   
   const playerRef = useRef<Entity>({
     x: 50, y: 300, width: 32, height: 48, color: COLORS.INK, vx: 0, vy: 0, type: 'PLAYER', scale: 1
@@ -51,7 +65,7 @@ const App: React.FC = () => {
 
   const currentLevel = LEVELS[currentLevelIdx];
 
-  // Sistema de responsividade
+  // Responsividade simplificada
   const updateCanvasSize = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -60,30 +74,25 @@ const App: React.FC = () => {
     if (!container) return;
     
     const maxWidth = Math.min(window.innerWidth * 0.95, 800);
-    const maxHeight = window.innerHeight * 0.6;
+    const height = maxWidth / 2;
     
-    // Manter aspect ratio 2:1
-    const width = Math.min(maxWidth, maxHeight * 2);
-    const height = width / 2;
-    
-    canvas.style.width = `${width}px`;
+    canvas.style.width = `${maxWidth}px`;
     canvas.style.height = `${height}px`;
     
-    // Atualizar escala para cálculos de colisão
     canvasSizeRef.current = {
-      width: 800, // Sempre renderizar em 800x400
+      width: 800,
       height: 400,
-      scale: width / 800
+      scale: maxWidth / 800
     };
   }, []);
 
   // Sistema de áudio simplificado
   const playSound = useCallback((type: 'jump' | 'hit' | 'death' | 'shoot' | 'win' | 'bossHit') => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    
     try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
       const ctx = audioContextRef.current;
       const oscillator = ctx.createOscillator();
       const gainNode = ctx.createGain();
@@ -91,20 +100,19 @@ const App: React.FC = () => {
       oscillator.connect(gainNode);
       gainNode.connect(ctx.destination);
       
-      // Frequências baseadas no tipo de som
       const frequencies = {
-        jump: 523.25, // C5
-        hit: 349.23,  // F4
-        death: 220,   // A3
-        shoot: 659.25, // E5
-        win: 1046.50, // C6
-        bossHit: 392   // G4
+        jump: 523.25,
+        hit: 349.23,
+        death: 220,
+        shoot: 659.25,
+        win: 1046.50,
+        bossHit: 392
       };
       
       oscillator.frequency.setValueAtTime(frequencies[type], ctx.currentTime);
       oscillator.type = 'sine';
       
-      gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
       gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
       
       oscillator.start();
@@ -114,19 +122,27 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Sistema de conquistas
-  const unlockAchievement = useCallback((id: string) => {
+  // Sistema de conquistas com popup
+  const unlockAchievement = useCallback((id: string, name: string) => {
     if (!achievements.includes(id)) {
       setAchievements(prev => [...prev, id]);
-      // Salvar conquistas no localStorage
+      setShowAchievement(name);
+      
       localStorage.setItem('dada_achievements', JSON.stringify([...achievements, id]));
       
-      // Feedback visual temporário
-      setTimeout(() => {
-        // Poderia mostrar um toast/notificação aqui
-      }, 100);
+      // Limpar timeout anterior
+      if (achievementTimeout) {
+        clearTimeout(achievementTimeout);
+      }
+      
+      // Esconder após 3 segundos
+      const timeout = setTimeout(() => {
+        setShowAchievement(null);
+      }, 3000);
+      
+      setAchievementTimeout(timeout);
     }
-  }, [achievements]);
+  }, [achievements, achievementTimeout]);
 
   // Sistema de partículas
   const createParticles = useCallback((x: number, y: number, count: number, color: string, spread: number = 5) => {
@@ -156,33 +172,27 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Sistema de screen shake melhorado
-  const triggerShake = useCallback((intensity: number, duration: number = 200) => {
+  // Sistema de screen shake simplificado mas FUNCIONAL
+  const triggerShake = useCallback((intensity: number) => {
     screenShakeRef.current.intensity = intensity;
-    
-    // Trigger mais forte para boss hit
-    if (intensity >= 15) {
-      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 30, COLORS.RED, 8);
-      playSound('bossHit');
-    } else if (intensity >= 10) {
-      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 15, COLORS.WHITE, 6);
-      playSound('hit');
-    }
-    
-    const decay = () => {
-      screenShakeRef.current.intensity *= 0.9;
-      if (screenShakeRef.current.intensity > 0.1) {
-        requestAnimationFrame(decay);
-      }
-    };
+    setShakeAmount(intensity);
     
     setTimeout(() => {
-      requestAnimationFrame(decay);
-    }, duration);
+      screenShakeRef.current.intensity = 0;
+      setShakeAmount(0);
+    }, 300);
+    
+    if (intensity >= 15) {
+      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 20, COLORS.RED, 8);
+      playSound('bossHit');
+    } else if (intensity >= 10) {
+      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 10, COLORS.WHITE, 6);
+      playSound('hit');
+    }
   }, [createParticles, playSound]);
 
   // Efeito de flash
-  const triggerFlash = useCallback((color: string = '#ffffff', duration: number = 100) => {
+  const triggerFlash = useCallback((duration: number = 100) => {
     setFlashEffect(true);
     setTimeout(() => setFlashEffect(false), duration);
   }, []);
@@ -197,15 +207,6 @@ const App: React.FC = () => {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     
-    // Hotkeys para debug
-    const handleDebugKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-        setDebugMode(prev => !prev);
-      }
-    };
-    
-    window.addEventListener('keydown', handleDebugKey);
-    
     // Carregar conquistas salvas
     const savedAchievements = localStorage.getItem('dada_achievements');
     if (savedAchievements) {
@@ -214,7 +215,7 @@ const App: React.FC = () => {
     
     return () => {
       window.removeEventListener('resize', checkMobile);
-      window.removeEventListener('keydown', handleDebugKey);
+      if (achievementTimeout) clearTimeout(achievementTimeout);
     };
   }, [updateCanvasSize]);
 
@@ -227,9 +228,9 @@ const App: React.FC = () => {
 
   const die = useCallback(() => {
     setDeaths(d => d + 1);
-    createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 50, COLORS.INK, 10);
-    triggerShake(20, 300);
-    triggerFlash('#ff0000', 200);
+    createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 30, COLORS.INK, 10);
+    triggerShake(20);
+    triggerFlash(200);
     playSound('death');
     
     playerRef.current.x = 50;
@@ -296,7 +297,9 @@ const App: React.FC = () => {
   }, [updateCanvasSize]);
 
   useEffect(() => {
-    if (gameState === GameState.PLAYING) initLevel(currentLevelIdx);
+    if (gameState === GameState.PLAYING) {
+      initLevel(currentLevelIdx);
+    }
   }, [gameState, currentLevelIdx, initLevel]);
 
   const handleKeyDown = (e: KeyboardEvent) => { 
@@ -308,8 +311,8 @@ const App: React.FC = () => {
   
   const handleKeyUp = (e: KeyboardEvent) => { keysRef.current[e.code] = false; };
 
-  // Controles touch corrigidos
-  const handleTouchStart = useCallback((direction: 'left' | 'right' | 'jump') => {
+  // Controles touch funcionais
+  const handleTouchStart = (direction: 'left' | 'right' | 'jump') => {
     if (direction === 'left') {
       keysRef.current['ArrowLeft'] = true;
     } else if (direction === 'right') {
@@ -318,9 +321,9 @@ const App: React.FC = () => {
       keysRef.current['Space'] = true;
       playSound('jump');
     }
-  }, [playSound]);
+  };
 
-  const handleTouchEnd = useCallback((direction: 'left' | 'right' | 'jump') => {
+  const handleTouchEnd = (direction: 'left' | 'right' | 'jump') => {
     if (direction === 'left') {
       keysRef.current['ArrowLeft'] = false;
     } else if (direction === 'right') {
@@ -328,7 +331,7 @@ const App: React.FC = () => {
     } else if (direction === 'jump') {
       keysRef.current['Space'] = false;
     }
-  }, []);
+  };
 
   const handleMouseMove = (e: MouseEvent) => {
     const canvas = canvasRef.current;
@@ -379,7 +382,12 @@ const App: React.FC = () => {
   }, [currentLevelIdx]);
 
   const update = useCallback((time: number) => {
-    if (gameState !== GameState.PLAYING) return;
+    if (gameState !== GameState.PLAYING) {
+      lastUpdateRef.current = time;
+      requestRef.current = requestAnimationFrame(update);
+      return;
+    }
+    
     const dt = Math.min(time - lastUpdateRef.current, 100) / 16;
     lastUpdateRef.current = time;
 
@@ -464,7 +472,7 @@ const App: React.FC = () => {
             p.y < proj.y + proj.height && 
             p.y + p.height > proj.y) {
           // Trigger screen shake when player is hit
-          triggerShake(15, 300);
+          triggerShake(15);
           createParticles(proj.x + 7.5, proj.y + 7.5, 20, COLORS.WHITE, 5);
           projectilesRef.current.splice(idx, 1);
           
@@ -515,8 +523,8 @@ const App: React.FC = () => {
         }
         
         if (ent.type === 'TRAP' && !invulnerable) {
-          triggerShake(20, 400);
-          triggerFlash('#ff0000', 150);
+          triggerShake(20);
+          triggerFlash(150);
           createParticles(p.x + 16, p.y + 24, 30, COLORS.TRAP, 8);
           die();
         }
@@ -530,15 +538,15 @@ const App: React.FC = () => {
                 const newHealth = prev - 1;
                 
                 // Trigger muito mais forte quando o boss é atingido
-                triggerShake(25, 500);
-                triggerFlash('#ffffff', 100);
+                triggerShake(25);
+                triggerFlash(100);
                 createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 50, COLORS.RED, 15);
                 
                 if (newHealth <= 0) {
                   // Boss defeated
                   createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 100, COLORS.GOLD, 20);
                   playSound('win');
-                  unlockAchievement('boss_defeated');
+                  unlockAchievement('boss_defeated', 'VENCEDOR DO BOSS');
                   
                   setTimeout(() => {
                     if (currentLevelIdx === LEVELS.length - 1) {
@@ -606,17 +614,7 @@ const App: React.FC = () => {
     });
 
     draw();
-    
-    // Atualizar screen shake
-    if (screenShakeRef.current.intensity > 0.1) {
-      screenShakeRef.current.x = (Math.random() - 0.5) * screenShakeRef.current.intensity;
-      screenShakeRef.current.y = (Math.random() - 0.5) * screenShakeRef.current.intensity;
-    } else {
-      screenShakeRef.current.x = 0;
-      screenShakeRef.current.y = 0;
-    }
-
-    animationFrameId.current = requestAnimationFrame(update);
+    requestRef.current = requestAnimationFrame(update);
   }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake, triggerFlash, createParticles, playSound, updatePlayerTrail, invulnerable, unlockAchievement]);
 
   const draw = () => {
@@ -627,8 +625,13 @@ const App: React.FC = () => {
     if (!ctx) return;
     
     // Aplicar screen shake
+    const shakeX = screenShakeRef.current.intensity > 0 ? 
+      (Math.random() - 0.5) * screenShakeRef.current.intensity * 2 : 0;
+    const shakeY = screenShakeRef.current.intensity > 0 ? 
+      (Math.random() - 0.5) * screenShakeRef.current.intensity * 2 : 0;
+    
     ctx.save();
-    ctx.translate(screenShakeRef.current.x, screenShakeRef.current.y);
+    ctx.translate(shakeX, shakeY);
     
     // Clear canvas with current background color
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -778,18 +781,6 @@ const App: React.FC = () => {
     
     ctx.restore();
 
-    // Modo debug
-    if (debugMode) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(10, 10, 200, 100);
-      ctx.fillStyle = 'white';
-      ctx.font = '12px monospace';
-      ctx.fillText(`Player: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`, 15, 30);
-      ctx.fillText(`Velocity: ${p.vx.toFixed(1)}, ${p.vy.toFixed(1)}`, 15, 50);
-      ctx.fillText(`Particles: ${particles.length}`, 15, 70);
-      ctx.fillText(`Projectiles: ${projectilesRef.current.length}`, 15, 90);
-    }
-
     ctx.restore(); // Restaurar transformação do shake
     
     // Efeito de flash (sobreposto)
@@ -800,16 +791,10 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // Limpar qualquer animation frame existente
-    if (animationFrameId.current) {
-      cancelAnimationFrame(animationFrameId.current);
-    }
-    
-    animationFrameId.current = requestAnimationFrame(update);
-    
+    requestRef.current = requestAnimationFrame(update);
     return () => {
-      if (animationFrameId.current) {
-        cancelAnimationFrame(animationFrameId.current);
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
       }
     };
   }, [update]);
@@ -842,7 +827,10 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-2 md:p-4 relative overflow-hidden select-none touch-none">
+    <div className="min-h-screen flex flex-col items-center justify-center p-2 md:p-4 relative overflow-hidden select-none touch-none" style={{
+      transform: `translate(${shakeAmount * (Math.random() - 0.5) * 0.5}px, ${shakeAmount * (Math.random() - 0.5) * 0.5}px)`,
+      transition: 'transform 0.05s linear'
+    }}>
       
       {/* Top Bar */}
       <div className="fixed top-0 left-0 w-full p-2 md:p-4 flex justify-between items-start z-[100] pointer-events-none">
@@ -859,7 +847,6 @@ const App: React.FC = () => {
             </span>
           </p>
           <p className="text-[8px] md:text-[10px]">MORTES: {deaths}</p>
-          {debugMode && <p className="text-[8px] text-yellow-400">DEBUG MODE</p>}
         </div>
         
         <div className="flex flex-col gap-2 items-end">
@@ -876,6 +863,18 @@ const App: React.FC = () => {
             )}
         </div>
       </div>
+
+      {/* Popup de conquista */}
+      {showAchievement && (
+        <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[200] animate-bounce">
+          <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-black p-4 md:p-6 border-4 md:border-8 border-black shadow-[10px_10px_0px_rgba(0,0,0,0.5)]">
+            <div className="text-center">
+              <p className="text-xl md:text-3xl font-black mb-2">🎉 CONQUISTA!</p>
+              <p className="text-lg md:text-2xl font-bold">{showAchievement}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {gameState === GameState.START && (
         <div className="z-10 text-center space-y-4 md:space-y-8 max-w-xl bg-white p-6 md:p-12 border-[8px] border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] relative mx-4">
@@ -916,88 +915,115 @@ const App: React.FC = () => {
       )}
 
       {gameState === GameState.PLAYING && (
-        <div className="z-10 flex flex-col items-center w-full">
-          <div className="mb-2 md:mb-6 text-center max-w-2xl bg-white p-2 border-2 border-black rotate-[-1deg] mx-2 shadow-md">
-             <div className="bg-black text-white px-4 py-1 mb-1">
+        <>
+          <div className="z-10 flex flex-col items-center w-full mb-2 md:mb-6">
+            <div className="text-center max-w-2xl bg-white p-2 border-2 border-black rotate-[-1deg] mx-2 shadow-md">
+              <div className="bg-black text-white px-4 py-1 mb-1">
                 <h2 className="text-xl md:text-3xl font-black uppercase tracking-widest leading-none">{currentLevel.title}</h2>
-             </div>
-             <p className="text-sm md:text-xl italic font-serif text-black font-bold">"{dadaQuote}"</p>
+              </div>
+              <p className="text-sm md:text-xl italic font-serif text-black font-bold">"{dadaQuote}"</p>
+            </div>
           </div>
 
-          <div className="relative border-[8px] md:border-[16px] border-black shadow-[20px_20px_0px_rgba(0,0,0,0.2)] bg-white overflow-hidden max-w-[95vw]">
-             
-             {showHelp && (
-                 <div className="absolute inset-0 bg-white z-[90] p-6 md:p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200">
-                     <h3 className="text-4xl md:text-6xl font-black text-black mb-6 uppercase border-b-8 border-black">O Oráculo Diz:</h3>
-                     <p className="text-xl md:text-3xl font-black leading-tight text-red-600 mb-10 bg-black p-4 inline-block">{currentLevel.solution}</p>
-                     <button onClick={() => setShowHelp(false)} className="bg-black text-white px-12 py-5 font-black uppercase text-2xl border-4 border-red-600 hover:bg-red-600 transition-colors">IGNORAR</button>
-                 </div>
-             )}
+          <div className="z-10 flex flex-col items-center w-full">
+            <div className="relative border-[8px] md:border-[16px] border-black shadow-[20px_20px_0px_rgba(0,0,0,0.2)] bg-white overflow-hidden max-w-[95vw]">
+              
+              {showHelp && (
+                <div className="absolute inset-0 bg-white z-[90] p-6 md:p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200">
+                  <h3 className="text-4xl md:text-6xl font-black text-black mb-6 uppercase border-b-8 border-black">O Oráculo Diz:</h3>
+                  <p className="text-xl md:text-3xl font-black leading-tight text-red-600 mb-10 bg-black p-4 inline-block">{currentLevel.solution}</p>
+                  <button onClick={() => setShowHelp(false)} className="bg-black text-white px-12 py-5 font-black uppercase text-2xl border-4 border-red-600 hover:bg-red-600 transition-colors">IGNORAR</button>
+                </div>
+              )}
 
-             {currentLevel.mechanic === 'GEMINI_SAYS' && (
-               <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-4 md:p-12 text-center text-white">
-                 <h3 className="text-3xl md:text-6xl font-black mb-4 text-yellow-400 uppercase">O Juiz de Tinta</h3>
-                 <p className="text-sm md:text-xl mb-6 italic">"O silêncio é uma arma branca. O que você tem a dizer?"</p>
-                 <input type="text" autoFocus value={playerInput} onChange={(e) => setPlayerInput(e.target.value)} className="w-full p-4 border-4 border-white text-xl md:text-3xl font-bold mb-6 bg-transparent text-white outline-none text-center" placeholder="..." />
-                 <button onClick={handleVerdictPredefined} disabled={isLoading} className="px-12 py-4 bg-white text-black text-2xl font-black hover:bg-red-600 transition-all uppercase">{isLoading ? "Processando..." : "ENVIAR"}</button>
-                 {dadaVerdict && <div className="mt-4 p-4 border-4 border-dashed border-white bg-red-900"><p className="text-xl md:text-2xl font-black">{dadaVerdict.reason}</p></div>}
-               </div>
-             )}
+              {currentLevel.mechanic === 'GEMINI_SAYS' && (
+                <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-4 md:p-12 text-center text-white">
+                  <h3 className="text-3xl md:text-6xl font-black mb-4 text-yellow-400 uppercase">O Juiz de Tinta</h3>
+                  <p className="text-sm md:text-xl mb-6 italic">"O silêncio é uma arma branca. O que você tem a dizer?"</p>
+                  <input 
+                    type="text" 
+                    autoFocus 
+                    value={playerInput} 
+                    onChange={(e) => setPlayerInput(e.target.value)} 
+                    className="w-full p-4 border-4 border-white text-xl md:text-3xl font-bold mb-6 bg-transparent text-white outline-none text-center" 
+                    placeholder="..." 
+                  />
+                  <button 
+                    onClick={handleVerdictPredefined} 
+                    disabled={isLoading} 
+                    className="px-12 py-4 bg-white text-black text-2xl font-black hover:bg-red-600 transition-all uppercase"
+                  >
+                    {isLoading ? "Processando..." : "ENVIAR"}
+                  </button>
+                  {dadaVerdict && (
+                    <div className="mt-4 p-4 border-4 border-dashed border-white bg-red-900">
+                      <p className="text-xl md:text-2xl font-black">{dadaVerdict.reason}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
-             <div className="relative w-full" style={{ paddingBottom: '50%' }}>
-               <canvas 
-                 ref={canvasRef} 
-                 width={800} 
-                 height={400} 
-                 className="absolute inset-0 w-full h-full bg-white cursor-none"
-               />
-             </div>
+              <canvas 
+                ref={canvasRef} 
+                width={800} 
+                height={400} 
+                className="w-full h-auto aspect-[2/1] bg-white cursor-none"
+              />
 
-             {!isMobile && (
-                 <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
-                   style={{ 
-                     left: mouseRef.current.x * canvasSizeRef.current.scale + (canvasRef.current?.getBoundingClientRect().left || 0) - 20, 
-                     top: mouseRef.current.y * canvasSizeRef.current.scale + (canvasRef.current?.getBoundingClientRect().top || 0) - 20 
-                   }}
-                 >👁️‍🗨️</div>
-             )}
-          </div>
+              {!isMobile && (
+                <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
+                  style={{ 
+                    left: mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0) - 20, 
+                    top: mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0) - 20 
+                  }}
+                >
+                  👁️‍🗨️
+                </div>
+              )}
+            </div>
 
-          <div className="mt-4 md:mt-10 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 max-w-3xl w-full px-2">
-            <div className="bg-white border-8 border-black p-4 md:p-6 rotate-1 shadow-[8px_8px_0px_black]">
+            <div className="mt-4 md:mt-10 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 max-w-3xl w-full px-2">
+              <div className="bg-white border-8 border-black p-4 md:p-6 rotate-1 shadow-[8px_8px_0px_black]">
                 <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">INSTRUÇÃO:</p>
                 <p className="text-sm md:text-lg font-bold text-black italic">{currentLevel.instruction}</p>
-            </div>
-            <div className="bg-yellow-400 text-black border-8 border-black p-4 md:p-6 -rotate-1 shadow-[8px_8px_0px_black]">
+              </div>
+              <div className="bg-yellow-400 text-black border-8 border-black p-4 md:p-6 -rotate-1 shadow-[8px_8px_0px_black]">
                 <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">REGRA:</p>
                 <p className="text-[10px] md:text-sm font-black uppercase">{currentLevel.rule}</p>
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {isMobile && gameState === GameState.PLAYING && (
-          <div className="fixed bottom-4 left-0 w-full flex justify-between px-4 sm:px-6 z-[120] pointer-events-none">
-              <div className="flex gap-2 sm:gap-4 pointer-events-auto">
-                  <button 
-                    onTouchStart={(e) => { e.preventDefault(); handleTouchStart('left'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('left'); }}
-                    className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
-                  >←</button>
-                  <button 
-                    onTouchStart={(e) => { e.preventDefault(); handleTouchStart('right'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('right'); }}
-                    className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
-                  >→</button>
-              </div>
-              <div className="pointer-events-auto">
-                  <button 
-                    onTouchStart={(e) => { e.preventDefault(); handleTouchStart('jump'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('jump'); }}
-                    className="w-14 h-14 sm:w-20 sm:h-20 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-lg sm:text-xl flex items-center justify-center active:bg-blue-600 rounded-full shadow-lg uppercase px-2"
-                  >PULO</button>
-              </div>
+        <div className="fixed bottom-4 left-0 w-full flex justify-between px-4 sm:px-6 z-[120] pointer-events-none">
+          <div className="flex gap-2 sm:gap-4 pointer-events-auto">
+            <button 
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('left'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('left'); }}
+              className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
+            >
+              ←
+            </button>
+            <button 
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('right'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('right'); }}
+              className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
+            >
+              →
+            </button>
           </div>
+          <div className="pointer-events-auto">
+            <button 
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('jump'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('jump'); }}
+              className="w-14 h-14 sm:w-20 sm:h-20 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-lg sm:text-xl flex items-center justify-center active:bg-blue-600 rounded-full shadow-lg uppercase px-2"
+            >
+              PULO
+            </button>
+          </div>
+        </div>
       )}
 
       {gameState === GameState.WIN_TROLL && (
@@ -1005,15 +1031,6 @@ const App: React.FC = () => {
           <h1 className="text-5xl md:text-9xl font-black mb-8 leading-none uppercase">VITÓRIA<br/>DADAISTA</h1>
           <p className="text-lg md:text-3xl mb-12 italic text-black font-serif">A conformidade morreu. Você completou o ciclo do absurdo.</p>
           <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="px-12 py-6 bg-red-600 text-white text-3xl font-black border-8 border-black uppercase hover:bg-black transition-all">ZERAR TUDO</button>
-        </div>
-      )}
-      
-      {/* Feedback visual de conquistas */}
-      {achievements.length > 0 && (
-        <div className="fixed top-20 right-4 z-[150]">
-          <div className="bg-black text-white p-2 border-2 border-yellow-400">
-            <p className="text-xs">Conquistas: {achievements.length}</p>
-          </div>
         </div>
       )}
     </div>
