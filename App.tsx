@@ -1,23 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, Entity } from './types';
+import { GameState, LevelConfig, Entity } from './types';
 import { LEVELS, COLORS, DADA_RESPONSES } from './constants';
-
-// Interfaces adicionais
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  color: string;
-  size: number;
-}
-
-interface ScreenShake {
-  x: number;
-  y: number;
-  intensity: number;
-}
 
 const App: React.FC = () => {
   // Persistence
@@ -40,19 +23,10 @@ const App: React.FC = () => {
   const [gravityInverted, setGravityInverted] = useState(false);
   const [bossHealth, setBossHealth] = useState(3);
   const [bossLastHitTime, setBossLastHitTime] = useState<number>(0);
-  const [particles, setParticles] = useState<Particle[]>([]);
-  const [achievements, setAchievements] = useState<string[]>([]);
-  const [invulnerable, setInvulnerable] = useState(false);
-  const [flashEffect, setFlashEffect] = useState(false);
-  const [playerTrail, setPlayerTrail] = useState<Array<{x: number, y: number, alpha: number}>>([]);
-  const [showAchievement, setShowAchievement] = useState<string | null>(null);
-  const [achievementTimeout, setAchievementTimeout] = useState<NodeJS.Timeout | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
   const lastUpdateRef = useRef<number>(0);
-  const screenShakeRef = useRef<ScreenShake>({ x: 0, y: 0, intensity: 0 });
-  const audioContextRef = useRef<AudioContext | null>(null);
   
   const playerRef = useRef<Entity>({
     x: 50, y: 300, width: 32, height: 48, color: COLORS.INK, vx: 0, vy: 0, type: 'PLAYER', scale: 1
@@ -61,163 +35,17 @@ const App: React.FC = () => {
   const projectilesRef = useRef<Entity[]>([]);
   const keysRef = useRef<{ [key: string]: boolean }>({});
   const mouseRef = useRef({ x: 0, y: 0 });
-  const canvasSizeRef = useRef({ width: 800, height: 400, scale: 1 });
 
   const currentLevel = LEVELS[currentLevelIdx];
 
-  // Responsividade simplificada
-  const updateCanvasSize = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const container = canvas.parentElement;
-    if (!container) return;
-    
-    const maxWidth = Math.min(window.innerWidth * 0.95, 800);
-    const height = maxWidth / 2;
-    
-    canvas.style.width = `${maxWidth}px`;
-    canvas.style.height = `${height}px`;
-    
-    canvasSizeRef.current = {
-      width: 800,
-      height: 400,
-      scale: maxWidth / 800
-    };
-  }, []);
-
-  // Sistema de áudio simplificado
-  const playSound = useCallback((type: 'jump' | 'hit' | 'death' | 'shoot' | 'win' | 'bossHit') => {
-    try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      
-      const ctx = audioContextRef.current;
-      const oscillator = ctx.createOscillator();
-      const gainNode = ctx.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(ctx.destination);
-      
-      const frequencies = {
-        jump: 523.25,
-        hit: 349.23,
-        death: 220,
-        shoot: 659.25,
-        win: 1046.50,
-        bossHit: 392
-      };
-      
-      oscillator.frequency.setValueAtTime(frequencies[type], ctx.currentTime);
-      oscillator.type = 'sine';
-      
-      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-      
-      oscillator.start();
-      oscillator.stop(ctx.currentTime + 0.3);
-    } catch (e) {
-      console.log("Audio not supported");
-    }
-  }, []);
-
-  // Sistema de conquistas com popup
-  const unlockAchievement = useCallback((id: string, name: string) => {
-    if (!achievements.includes(id)) {
-      setAchievements(prev => [...prev, id]);
-      setShowAchievement(name);
-      
-      localStorage.setItem('dada_achievements', JSON.stringify([...achievements, id]));
-      
-      // Limpar timeout anterior
-      if (achievementTimeout) {
-        clearTimeout(achievementTimeout);
-      }
-      
-      // Esconder após 3 segundos
-      const timeout = setTimeout(() => {
-        setShowAchievement(null);
-      }, 3000);
-      
-      setAchievementTimeout(timeout);
-    }
-  }, [achievements, achievementTimeout]);
-
-  // Sistema de partículas
-  const createParticles = useCallback((x: number, y: number, count: number, color: string, spread: number = 5) => {
-    const newParticles: Particle[] = [];
-    for (let i = 0; i < count; i++) {
-      newParticles.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * spread,
-        vy: (Math.random() - 0.5) * spread,
-        life: 1.0,
-        color,
-        size: Math.random() * 4 + 2
-      });
-    }
-    setParticles(prev => [...prev, ...newParticles]);
-  }, []);
-
-  // Sistema de trail do jogador
-  const updatePlayerTrail = useCallback((x: number, y: number) => {
-    setPlayerTrail(prev => {
-      const newTrail = [{ x, y, alpha: 1.0 }, ...prev.slice(0, 9)];
-      return newTrail.map((pos, i) => ({
-        ...pos,
-        alpha: 1.0 - (i / 10)
-      }));
-    });
-  }, []);
-
-  // Sistema de screen shake simplificado mas FUNCIONAL
-  const triggerShake = useCallback((intensity: number) => {
-    screenShakeRef.current.intensity = intensity;
-    setShakeAmount(intensity);
-    
-    setTimeout(() => {
-      screenShakeRef.current.intensity = 0;
-      setShakeAmount(0);
-    }, 300);
-    
-    if (intensity >= 15) {
-      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 20, COLORS.RED, 8);
-      playSound('bossHit');
-    } else if (intensity >= 10) {
-      createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 10, COLORS.WHITE, 6);
-      playSound('hit');
-    }
-  }, [createParticles, playSound]);
-
-  // Efeito de flash
-  const triggerFlash = useCallback((duration: number = 100) => {
-    setFlashEffect(true);
-    setTimeout(() => setFlashEffect(false), duration);
-  }, []);
-
   useEffect(() => {
     const checkMobile = () => {
-      const isMobileDevice = window.innerWidth < 1024 || 'ontouchstart' in window;
-      setIsMobile(isMobileDevice);
-      updateCanvasSize();
+      setIsMobile(window.innerWidth < 1024 || 'ontouchstart' in window);
     };
-    
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    
-    // Carregar conquistas salvas
-    const savedAchievements = localStorage.getItem('dada_achievements');
-    if (savedAchievements) {
-      setAchievements(JSON.parse(savedAchievements));
-    }
-    
-    return () => {
-      window.removeEventListener('resize', checkMobile);
-      if (achievementTimeout) clearTimeout(achievementTimeout);
-    };
-  }, [updateCanvasSize]);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('dada_level', currentLevelIdx.toString());
@@ -228,11 +56,6 @@ const App: React.FC = () => {
 
   const die = useCallback(() => {
     setDeaths(d => d + 1);
-    createParticles(playerRef.current.x + 16, playerRef.current.y + 24, 30, COLORS.INK, 10);
-    triggerShake(20);
-    triggerFlash(200);
-    playSound('death');
-    
     playerRef.current.x = 50;
     playerRef.current.y = 300;
     playerRef.current.vx = 0;
@@ -243,7 +66,7 @@ const App: React.FC = () => {
       setBossHealth(3);
       setBossLastHitTime(0);
     }
-  }, [currentLevelIdx, createParticles, triggerShake, triggerFlash, playSound]);
+  }, [currentLevelIdx]);
 
   const initLevel = useCallback((idx: number) => {
     const level = LEVELS[idx];
@@ -256,9 +79,6 @@ const App: React.FC = () => {
     setBossHealth(3);
     setBossLastHitTime(0);
     setShakeAmount(0);
-    setParticles([]);
-    setPlayerTrail([]);
-    setInvulnerable(false);
     projectilesRef.current = [];
     
     const platforms: Entity[] = [
@@ -293,45 +113,15 @@ const App: React.FC = () => {
 
     entitiesRef.current = platforms;
     setDadaQuote(DADA_RESPONSES[Math.floor(Math.random() * DADA_RESPONSES.length)]);
-    updateCanvasSize();
-  }, [updateCanvasSize]);
+  }, []);
 
   useEffect(() => {
-    if (gameState === GameState.PLAYING) {
-      initLevel(currentLevelIdx);
-    }
+    if (gameState === GameState.PLAYING) initLevel(currentLevelIdx);
   }, [gameState, currentLevelIdx, initLevel]);
 
-  const handleKeyDown = (e: KeyboardEvent) => { 
-    keysRef.current[e.code] = true; 
-    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
-      playSound('jump');
-    }
-  };
-  
+  const handleKeyDown = (e: KeyboardEvent) => { keysRef.current[e.code] = true; };
   const handleKeyUp = (e: KeyboardEvent) => { keysRef.current[e.code] = false; };
-
-  // Controles touch funcionais
-  const handleTouchStart = (direction: 'left' | 'right' | 'jump') => {
-    if (direction === 'left') {
-      keysRef.current['ArrowLeft'] = true;
-    } else if (direction === 'right') {
-      keysRef.current['ArrowRight'] = true;
-    } else if (direction === 'jump') {
-      keysRef.current['Space'] = true;
-      playSound('jump');
-    }
-  };
-
-  const handleTouchEnd = (direction: 'left' | 'right' | 'jump') => {
-    if (direction === 'left') {
-      keysRef.current['ArrowLeft'] = false;
-    } else if (direction === 'right') {
-      keysRef.current['ArrowRight'] = false;
-    } else if (direction === 'jump') {
-      keysRef.current['Space'] = false;
-    }
-  };
+  const handleTouchControl = (key: string, pressed: boolean) => { keysRef.current[key] = pressed; };
 
   const handleMouseMove = (e: MouseEvent) => {
     const canvas = canvasRef.current;
@@ -339,10 +129,7 @@ const App: React.FC = () => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      mouseRef.current = { 
-        x: (e.clientX - rect.left) * scaleX, 
-        y: (e.clientY - rect.top) * scaleY 
-      };
+      mouseRef.current = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
     }
   };
 
@@ -351,14 +138,8 @@ const App: React.FC = () => {
         const goal = entitiesRef.current.find(ent => ent.type === 'GOAL');
         const p = playerRef.current;
         if (goal) {
-            const mouseOverGoal = mouseRef.current.x > goal.x && 
-                                 mouseRef.current.x < goal.x + goal.width && 
-                                 mouseRef.current.y > goal.y && 
-                                 mouseRef.current.y < goal.y + goal.height;
-            const playerTouchingGoal = p.x < goal.x + goal.width && 
-                                       p.x + p.width > goal.x && 
-                                       p.y < goal.y + goal.height && 
-                                       p.y + p.height > goal.y;
+            const mouseOverGoal = mouseRef.current.x > goal.x && mouseRef.current.x < goal.x + goal.width && mouseRef.current.y > goal.y && mouseRef.current.y < goal.y + goal.height;
+            const playerTouchingGoal = p.x < goal.x + goal.width && p.x + p.width > goal.x && p.y < goal.y + goal.height && p.y + p.height > goal.y;
             if (mouseOverGoal && playerTouchingGoal) {
                 if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
                 else setCurrentLevelIdx(prev => prev + 1);
@@ -372,7 +153,6 @@ const App: React.FC = () => {
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mousedown', handleMouseDown);
-    
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
@@ -381,14 +161,14 @@ const App: React.FC = () => {
     };
   }, [currentLevelIdx]);
 
+  const triggerShake = useCallback((intensity: number) => {
+    setShakeAmount(intensity);
+    setTimeout(() => setShakeAmount(0), 200);
+  }, []);
+
   const update = useCallback((time: number) => {
-    if (gameState !== GameState.PLAYING) {
-      lastUpdateRef.current = time;
-      requestRef.current = requestAnimationFrame(update);
-      return;
-    }
-    
-    const dt = Math.min(time - lastUpdateRef.current, 100) / 16;
+    if (gameState !== GameState.PLAYING) return;
+    const dt = time - lastUpdateRef.current;
     lastUpdateRef.current = time;
 
     const p = playerRef.current;
@@ -405,8 +185,8 @@ const App: React.FC = () => {
     const jumpPower = gravityInverted ? 10 : -11;
 
     let moveX = 0;
-    if (keysRef.current['ArrowLeft'] || keysRef.current['KeyA']) moveX -= 1;
-    if (keysRef.current['ArrowRight'] || keysRef.current['KeyD']) moveX += 1;
+    if (keysRef.current['ArrowLeft'] || keysRef.current['KeyA'] || keysRef.current['TouchLeft']) moveX -= 1;
+    if (keysRef.current['ArrowRight'] || keysRef.current['KeyD'] || keysRef.current['TouchRight']) moveX += 1;
     if (level.mechanic === 'REVERSE') moveX *= -1;
 
     p.vx = moveX * speed;
@@ -421,19 +201,13 @@ const App: React.FC = () => {
     let deltaMultiplier = 1;
     if (level.mechanic === 'TIME_DILATION') deltaMultiplier = Math.max(0.1, 1 - (p.x / 800));
 
-    p.x += p.vx * deltaMultiplier * dt;
-    p.y += p.vy * deltaMultiplier * dt;
+    p.x += p.vx * deltaMultiplier;
+    p.y += p.vy * deltaMultiplier;
 
-    if (keysRef.current['ArrowUp'] || keysRef.current['Space'] || keysRef.current['KeyW']) {
+    if (keysRef.current['ArrowUp'] || keysRef.current['Space'] || keysRef.current['KeyW'] || keysRef.current['TouchJump']) {
       const onFloor = gravityInverted ? p.y <= 10 : p.y >= 330;
-      if (onFloor || Math.abs(p.vy) < 0.8) {
-        p.vy = jumpPower;
-        createParticles(p.x + 16, p.y + 48, 5, gravityInverted ? COLORS.BLUE : COLORS.INK, 2);
-      }
+      if (onFloor || Math.abs(p.vy) < 0.8) p.vy = jumpPower;
     }
-
-    // Atualizar trail do jogador
-    updatePlayerTrail(p.x + 16, p.y + 24);
 
     // Boss Projectiles
     if (level.mechanic === 'BOSS_FIGHT' && Math.random() < 0.02) {
@@ -449,15 +223,13 @@ const App: React.FC = () => {
                 vy: (Math.random() - 0.5) * 4, 
                 type: 'PROJECTILE'
             });
-            createParticles(goal.x, goal.y + goal.height/2, 3, COLORS.RED, 1);
-            playSound('shoot');
         }
     }
 
     // Update projectiles
     projectilesRef.current.forEach((proj, idx) => {
-        proj.x += proj.vx * dt; 
-        proj.y += proj.vy * dt;
+        proj.x += proj.vx; 
+        proj.y += proj.vy;
         
         // Remove projectiles that go off screen
         if (proj.x < -20 || proj.x > 820 || proj.y < -20 || proj.y > 420) {
@@ -466,35 +238,16 @@ const App: React.FC = () => {
         }
         
         // Check collision with player
-        if (!invulnerable && 
-            p.x < proj.x + proj.width && 
+        if (p.x < proj.x + proj.width && 
             p.x + p.width > proj.x && 
             p.y < proj.y + proj.height && 
             p.y + p.height > proj.y) {
           // Trigger screen shake when player is hit
-          triggerShake(15);
-          createParticles(proj.x + 7.5, proj.y + 7.5, 20, COLORS.WHITE, 5);
-          projectilesRef.current.splice(idx, 1);
-          
-          // Temporariamente invulnerável
-          setInvulnerable(true);
-          setTimeout(() => setInvulnerable(false), 1000);
-          
+          triggerShake(10);
           die();
           return;
         }
     });
-
-    // Atualizar partículas
-    setParticles(prev => prev
-      .map(particle => ({
-        ...particle,
-        x: particle.x + particle.vx * dt,
-        y: particle.y + particle.vy * dt,
-        life: particle.life - 0.02
-      }))
-      .filter(particle => particle.life > 0)
-    );
 
     // Screen boundaries
     if (p.x < 0) p.x = 0;
@@ -522,32 +275,25 @@ const App: React.FC = () => {
           }
         }
         
-        if (ent.type === 'TRAP' && !invulnerable) {
-          triggerShake(20);
-          triggerFlash(150);
-          createParticles(p.x + 16, p.y + 24, 30, COLORS.TRAP, 8);
+        if (ent.type === 'TRAP') {
+          triggerShake(8);
           die();
         }
         
         if (ent.type === 'GOAL' && doorOpen && level.id !== 9 && level.mechanic !== 'DUAL_CONTACT') {
           if (level.mechanic === 'BOSS_FIGHT') {
+            // Cooldown for boss hits (500ms)
             const currentTime = Date.now();
             if (currentTime - bossLastHitTime > 500) {
               setBossLastHitTime(currentTime);
               setBossHealth(prev => {
                 const newHealth = prev - 1;
                 
-                // Trigger muito mais forte quando o boss é atingido
-                triggerShake(25);
-                triggerFlash(100);
-                createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 50, COLORS.RED, 15);
+                // Trigger stronger shake when boss is hit
+                triggerShake(15);
                 
                 if (newHealth <= 0) {
                   // Boss defeated
-                  createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 100, COLORS.GOLD, 20);
-                  playSound('win');
-                  unlockAchievement('boss_defeated', 'VENCEDOR DO BOSS');
-                  
                   setTimeout(() => {
                     if (currentLevelIdx === LEVELS.length - 1) {
                       setGameState(GameState.WIN_TROLL);
@@ -562,8 +308,6 @@ const App: React.FC = () => {
                   ent.x = newBossX;
                   ent.y = newBossY;
                   
-                  createParticles(newBossX + ent.width/2, newBossY + ent.height/2, 30, COLORS.RED, 10);
-                  
                   // Reset player position
                   p.x = 50;
                   p.y = 300;
@@ -575,9 +319,6 @@ const App: React.FC = () => {
             }
           } else {
             // Normal level completion
-            createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 30, COLORS.GOLD, 8);
-            playSound('win');
-            
             if (currentLevelIdx === LEVELS.length - 1) {
               setGameState(GameState.WIN_TROLL);
             } else {
@@ -588,8 +329,7 @@ const App: React.FC = () => {
         
         if (ent.type === 'BUTTON') { 
           setDoorOpen(true); 
-          ent.color = COLORS.GOLD;
-          createParticles(ent.x + ent.width/2, ent.y + ent.height/2, 20, COLORS.GOLD, 5);
+          ent.color = COLORS.GOLD; 
         }
       }
 
@@ -599,8 +339,8 @@ const App: React.FC = () => {
         const dy = ent.y + ent.height/2 - mouseRef.current.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < 150) {
-          ent.x += (dx/dist) * 10 * dt; 
-          ent.y += (dy/dist) * 10 * dt;
+          ent.x += (dx/dist) * 10; 
+          ent.y += (dy/dist) * 10;
           if (ent.x < 0 || ent.x > 760) ent.x = Math.random() * 700;
           if (ent.y < 0 || ent.y > 340) ent.y = Math.random() * 300;
         }
@@ -615,41 +355,18 @@ const App: React.FC = () => {
 
     draw();
     requestRef.current = requestAnimationFrame(update);
-  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake, triggerFlash, createParticles, playSound, updatePlayerTrail, invulnerable, unlockAchievement]);
+  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake]);
 
   const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
-    // Aplicar screen shake
-    const shakeX = screenShakeRef.current.intensity > 0 ? 
-      (Math.random() - 0.5) * screenShakeRef.current.intensity * 2 : 0;
-    const shakeY = screenShakeRef.current.intensity > 0 ? 
-      (Math.random() - 0.5) * screenShakeRef.current.intensity * 2 : 0;
-    
-    ctx.save();
-    ctx.translate(shakeX, shakeY);
     
     // Clear canvas with current background color
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = currentLevel.bgColor || COLORS.PAPER;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Desenhar trail do jogador
-    playerTrail.forEach((pos, i) => {
-      ctx.globalAlpha = pos.alpha;
-      ctx.fillStyle = invulnerable ? '#ff9900' : COLORS.INK;
-      ctx.fillRect(
-        pos.x - 8, 
-        pos.y - 12, 
-        16 * (1 - i/10), 
-        24 * (1 - i/10)
-      );
-    });
-    ctx.globalAlpha = 1.0;
 
     // Draw entities
     entitiesRef.current.forEach(ent => {
@@ -682,15 +399,6 @@ const App: React.FC = () => {
             ctx.font = 'bold 20px Courier';
             ctx.textAlign = 'center';
             ctx.fillText("HP:" + bossHealth, 0, -70);
-            
-            // Health bar
-            ctx.fillStyle = '#ff0000';
-            ctx.fillRect(-30, -80, 60, 8);
-            ctx.fillStyle = '#00ff00';
-            ctx.fillRect(-30, -80, (bossHealth / 3) * 60, 8);
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(-30, -80, 60, 8);
           }
         } else {
           // Draw locked door
@@ -730,34 +438,12 @@ const App: React.FC = () => {
       ctx.beginPath();
       ctx.arc(p.x + p.width/2, p.y + p.height/2, p.width/2, 0, Math.PI * 2);
       ctx.fill();
-      
-      // Glow effect for projectiles
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 10;
-      ctx.fill();
-      ctx.shadowBlur = 0;
     });
-
-    // Draw particles
-    particles.forEach(particle => {
-      ctx.globalAlpha = particle.life;
-      ctx.fillStyle = particle.color;
-      ctx.beginPath();
-      ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1.0;
 
     // Draw player
     const p = playerRef.current;
     ctx.save();
     ctx.translate(p.x + p.width/2, p.y + p.height/2);
-    
-    // Piscar quando invulnerável
-    if (invulnerable && Math.floor(Date.now() / 100) % 2 === 0) {
-      ctx.globalAlpha = 0.5;
-    }
-    
     ctx.fillStyle = p.color;
     ctx.fillRect(-p.width/2, -p.height/2, p.width, p.height);
     ctx.fillStyle = COLORS.WHITE;
@@ -768,34 +454,13 @@ const App: React.FC = () => {
     ctx.beginPath(); 
     ctx.arc(0, -p.height/4, 4, 0, Math.PI * 2); 
     ctx.fill();
-    
-    // Indicador de gravidade invertida
-    if (gravityInverted) {
-      ctx.fillStyle = '#00ffff';
-      ctx.beginPath();
-      ctx.moveTo(-p.width/2, -p.height/2);
-      ctx.lineTo(p.width/2, -p.height/2);
-      ctx.lineTo(0, -p.height/2 - 10);
-      ctx.fill();
-    }
-    
     ctx.restore();
-
-    ctx.restore(); // Restaurar transformação do shake
-    
-    // Efeito de flash (sobreposto)
-    if (flashEffect) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
   };
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(update);
-    return () => {
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-      }
+    return () => { 
+      if (requestRef.current) cancelAnimationFrame(requestRef.current); 
     };
   }, [update]);
 
@@ -827,10 +492,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-2 md:p-4 relative overflow-hidden select-none touch-none" style={{
-      transform: `translate(${shakeAmount * (Math.random() - 0.5) * 0.5}px, ${shakeAmount * (Math.random() - 0.5) * 0.5}px)`,
-      transition: 'transform 0.05s linear'
-    }}>
+    <div className="min-h-screen flex flex-col items-center justify-center p-2 md:p-4 relative overflow-hidden select-none touch-none">
       
       {/* Top Bar */}
       <div className="fixed top-0 left-0 w-full p-2 md:p-4 flex justify-between items-start z-[100] pointer-events-none">
@@ -863,18 +525,6 @@ const App: React.FC = () => {
             )}
         </div>
       </div>
-
-      {/* Popup de conquista */}
-      {showAchievement && (
-        <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[200] animate-bounce">
-          <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-black p-4 md:p-6 border-4 md:border-8 border-black shadow-[10px_10px_0px_rgba(0,0,0,0.5)]">
-            <div className="text-center">
-              <p className="text-xl md:text-3xl font-black mb-2">🎉 CONQUISTA!</p>
-              <p className="text-lg md:text-2xl font-bold">{showAchievement}</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {gameState === GameState.START && (
         <div className="z-10 text-center space-y-4 md:space-y-8 max-w-xl bg-white p-6 md:p-12 border-[8px] border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] relative mx-4">
@@ -915,115 +565,92 @@ const App: React.FC = () => {
       )}
 
       {gameState === GameState.PLAYING && (
-        <>
-          <div className="z-10 flex flex-col items-center w-full mb-2 md:mb-6">
-            <div className="text-center max-w-2xl bg-white p-2 border-2 border-black rotate-[-1deg] mx-2 shadow-md">
-              <div className="bg-black text-white px-4 py-1 mb-1">
+        <div 
+          className="z-10 flex flex-col items-center w-full transition-transform duration-75" 
+          style={{ 
+            transform: `translate(${Math.random() * shakeAmount - shakeAmount/2}px, ${Math.random() * shakeAmount - shakeAmount/2}px)`,
+            transition: 'transform 0.1s linear'
+          }}
+        >
+          <div className="mb-2 md:mb-6 text-center max-w-2xl bg-white p-2 border-2 border-black rotate-[-1deg] mx-2 shadow-md">
+             <div className="bg-black text-white px-4 py-1 mb-1">
                 <h2 className="text-xl md:text-3xl font-black uppercase tracking-widest leading-none">{currentLevel.title}</h2>
-              </div>
-              <p className="text-sm md:text-xl italic font-serif text-black font-bold">"{dadaQuote}"</p>
-            </div>
+             </div>
+             <p className="text-sm md:text-xl italic font-serif text-black font-bold">"{dadaQuote}"</p>
           </div>
 
-          <div className="z-10 flex flex-col items-center w-full">
-            <div className="relative border-[8px] md:border-[16px] border-black shadow-[20px_20px_0px_rgba(0,0,0,0.2)] bg-white overflow-hidden max-w-[95vw]">
-              
-              {showHelp && (
-                <div className="absolute inset-0 bg-white z-[90] p-6 md:p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200">
-                  <h3 className="text-4xl md:text-6xl font-black text-black mb-6 uppercase border-b-8 border-black">O Oráculo Diz:</h3>
-                  <p className="text-xl md:text-3xl font-black leading-tight text-red-600 mb-10 bg-black p-4 inline-block">{currentLevel.solution}</p>
-                  <button onClick={() => setShowHelp(false)} className="bg-black text-white px-12 py-5 font-black uppercase text-2xl border-4 border-red-600 hover:bg-red-600 transition-colors">IGNORAR</button>
-                </div>
-              )}
+          <div className="relative border-[8px] md:border-[16px] border-black shadow-[20px_20px_0px_rgba(0,0,0,0.2)] bg-white overflow-hidden max-w-[95vw]">
+             
+             {showHelp && (
+                 <div className="absolute inset-0 bg-white z-[90] p-6 md:p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200">
+                     <h3 className="text-4xl md:text-6xl font-black text-black mb-6 uppercase border-b-8 border-black">O Oráculo Diz:</h3>
+                     <p className="text-xl md:text-3xl font-black leading-tight text-red-600 mb-10 bg-black p-4 inline-block">{currentLevel.solution}</p>
+                     <button onClick={() => setShowHelp(false)} className="bg-black text-white px-12 py-5 font-black uppercase text-2xl border-4 border-red-600 hover:bg-red-600 transition-colors">IGNORAR</button>
+                 </div>
+             )}
 
-              {currentLevel.mechanic === 'GEMINI_SAYS' && (
-                <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-4 md:p-12 text-center text-white">
-                  <h3 className="text-3xl md:text-6xl font-black mb-4 text-yellow-400 uppercase">O Juiz de Tinta</h3>
-                  <p className="text-sm md:text-xl mb-6 italic">"O silêncio é uma arma branca. O que você tem a dizer?"</p>
-                  <input 
-                    type="text" 
-                    autoFocus 
-                    value={playerInput} 
-                    onChange={(e) => setPlayerInput(e.target.value)} 
-                    className="w-full p-4 border-4 border-white text-xl md:text-3xl font-bold mb-6 bg-transparent text-white outline-none text-center" 
-                    placeholder="..." 
-                  />
-                  <button 
-                    onClick={handleVerdictPredefined} 
-                    disabled={isLoading} 
-                    className="px-12 py-4 bg-white text-black text-2xl font-black hover:bg-red-600 transition-all uppercase"
-                  >
-                    {isLoading ? "Processando..." : "ENVIAR"}
-                  </button>
-                  {dadaVerdict && (
-                    <div className="mt-4 p-4 border-4 border-dashed border-white bg-red-900">
-                      <p className="text-xl md:text-2xl font-black">{dadaVerdict.reason}</p>
-                    </div>
-                  )}
-                </div>
-              )}
+             {currentLevel.mechanic === 'GEMINI_SAYS' && (
+               <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-4 md:p-12 text-center text-white">
+                 <h3 className="text-3xl md:text-6xl font-black mb-4 text-yellow-400 uppercase">O Juiz de Tinta</h3>
+                 <p className="text-sm md:text-xl mb-6 italic">"O silêncio é uma arma branca. O que você tem a dizer?"</p>
+                 <input type="text" autoFocus value={playerInput} onChange={(e) => setPlayerInput(e.target.value)} className="w-full p-4 border-4 border-white text-xl md:text-3xl font-bold mb-6 bg-transparent text-white outline-none text-center" placeholder="..." />
+                 <button onClick={handleVerdictPredefined} disabled={isLoading} className="px-12 py-4 bg-white text-black text-2xl font-black hover:bg-red-600 transition-all uppercase">{isLoading ? "Processando..." : "ENVIAR"}</button>
+                 {dadaVerdict && <div className="mt-4 p-4 border-4 border-dashed border-white bg-red-900"><p className="text-xl md:text-2xl font-black">{dadaVerdict.reason}</p></div>}
+               </div>
+             )}
 
-              <canvas 
-                ref={canvasRef} 
-                width={800} 
-                height={400} 
-                className="w-full h-auto aspect-[2/1] bg-white cursor-none"
-              />
+             <canvas 
+               ref={canvasRef} 
+               width={800} 
+               height={400} 
+               className="w-full h-auto aspect-[2/1] bg-white cursor-none"
+             />
 
-              {!isMobile && (
-                <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
-                  style={{ 
-                    left: mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0) - 20, 
-                    top: mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0) - 20 
-                  }}
-                >
-                  👁️‍🗨️
-                </div>
-              )}
-            </div>
+             {!isMobile && (
+                 <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
+                   style={{ 
+                     left: mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0) / (800 / (canvasRef.current?.clientWidth || 800)) - 20, 
+                     top: mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0) / (400 / (canvasRef.current?.clientHeight || 400)) - 20 
+                   }}
+                 >👁️‍🗨️</div>
+             )}
+          </div>
 
-            <div className="mt-4 md:mt-10 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 max-w-3xl w-full px-2">
-              <div className="bg-white border-8 border-black p-4 md:p-6 rotate-1 shadow-[8px_8px_0px_black]">
+          <div className="mt-4 md:mt-10 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 max-w-3xl w-full px-2">
+            <div className="bg-white border-8 border-black p-4 md:p-6 rotate-1 shadow-[8px_8px_0px_black]">
                 <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">INSTRUÇÃO:</p>
                 <p className="text-sm md:text-lg font-bold text-black italic">{currentLevel.instruction}</p>
-              </div>
-              <div className="bg-yellow-400 text-black border-8 border-black p-4 md:p-6 -rotate-1 shadow-[8px_8px_0px_black]">
+            </div>
+            <div className="bg-yellow-400 text-black border-8 border-black p-4 md:p-6 -rotate-1 shadow-[8px_8px_0px_black]">
                 <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">REGRA:</p>
                 <p className="text-[10px] md:text-sm font-black uppercase">{currentLevel.rule}</p>
-              </div>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {isMobile && gameState === GameState.PLAYING && (
-        <div className="fixed bottom-4 left-0 w-full flex justify-between px-4 sm:px-6 z-[120] pointer-events-none">
-          <div className="flex gap-2 sm:gap-4 pointer-events-auto">
-            <button 
-              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('left'); }}
-              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('left'); }}
-              className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
-            >
-              ←
-            </button>
-            <button 
-              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('right'); }}
-              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('right'); }}
-              className="w-12 h-12 sm:w-16 sm:h-16 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-2xl sm:text-3xl flex items-center justify-center active:bg-red-600 rounded-full shadow-lg"
-            >
-              →
-            </button>
+          <div className="fixed bottom-4 left-0 w-full flex justify-between px-6 z-[120] pointer-events-none">
+              <div className="flex gap-4 pointer-events-auto">
+                  <button 
+                    onTouchStart={() => handleTouchControl('TouchLeft', true)} 
+                    onTouchEnd={() => handleTouchControl('TouchLeft', false)} 
+                    className="w-16 h-16 bg-black/80 border-4 border-white text-white font-black text-3xl flex items-center justify-center active:bg-red-600 rounded-full"
+                  >←</button>
+                  <button 
+                    onTouchStart={() => handleTouchControl('TouchRight', true)} 
+                    onTouchEnd={() => handleTouchControl('TouchRight', false)} 
+                    className="w-16 h-16 bg-black/80 border-4 border-white text-white font-black text-3xl flex items-center justify-center active:bg-red-600 rounded-full"
+                  >→</button>
+              </div>
+              <div className="pointer-events-auto">
+                  <button 
+                    onTouchStart={() => handleTouchControl('TouchJump', true)} 
+                    onTouchEnd={() => handleTouchControl('TouchJump', false)} 
+                    className="w-20 h-20 bg-black/80 border-4 border-white text-white font-black text-xl flex items-center justify-center active:bg-blue-600 rounded-full uppercase"
+                  >PULO</button>
+              </div>
           </div>
-          <div className="pointer-events-auto">
-            <button 
-              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('jump'); }}
-              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('jump'); }}
-              className="w-14 h-14 sm:w-20 sm:h-20 bg-black/90 border-2 sm:border-4 border-white text-white font-black text-lg sm:text-xl flex items-center justify-center active:bg-blue-600 rounded-full shadow-lg uppercase px-2"
-            >
-              PULO
-            </button>
-          </div>
-        </div>
       )}
 
       {gameState === GameState.WIN_TROLL && (
