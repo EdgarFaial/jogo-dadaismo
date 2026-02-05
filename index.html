@@ -1,0 +1,91 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DADA-Troll: O Anti-Jogo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Courier+Prime&family=Crimson+Text:ital@1&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --paper: #e8e4d9;
+            --ink: #1a1a1a;
+            --accent: #bc2a1e;
+        }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: var(--paper);
+            font-family: 'Special Elite', system-ui;
+            background-image: 
+                url('https://www.transparenttextures.com/patterns/cardboard-flat.png'),
+                radial-gradient(circle at 50% 50%, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.1) 100%);
+        }
+        canvas {
+            image-rendering: pixelated;
+            filter: contrast(1.2) sepia(0.2) brightness(1.1);
+        }
+        .newspaper-clip {
+            background: #fff;
+            box-shadow: 2px 2px 0px rgba(0,0,0,0.2);
+            padding: 2px 5px;
+            transform: rotate(-2deg);
+            display: inline-block;
+        }
+        .dada-shake {
+            animation: shake 0.5s infinite;
+        }
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .grain {
+            pointer-events: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: url('https://www.transparenttextures.com/patterns/stardust.png');
+            opacity: 0.15;
+            z-index: 100;
+        }
+        .vignette {
+            pointer-events: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.2) 100%);
+            z-index: 99;
+        }
+        .collage-border {
+            border-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="none" stroke="black" stroke-width="10" stroke-dasharray="15 5"/></svg>') 30 stretch;
+            border-width: 8px;
+            border-style: solid;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div id="root"></div>
+    <div class="grain"></div>
+    <div class="vignette"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
