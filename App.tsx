@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const projectilesRef = useRef<Entity[]>([]);
   const keysRef = useRef<{ [key: string]: boolean }>({});
   const mouseRef = useRef({ x: 0, y: 0 });
+  const mouseVisibleRef = useRef(true);
 
   const currentLevel = LEVELS[currentLevelIdx];
 
@@ -66,7 +67,7 @@ const App: React.FC = () => {
   const die = useCallback(() => {
     setDeaths(d => d + 1);
     playerRef.current.x = 50;
-    playerRef.current.y = 300;
+    playerRef.current.y = gravityInverted ? 50 : 300;
     playerRef.current.vx = 0;
     playerRef.current.vy = 0;
     playerRef.current.scale = 1;
@@ -75,7 +76,7 @@ const App: React.FC = () => {
       setBossHealth(3);
       setBossLastHitTime(0);
     }
-  }, [currentLevelIdx]);
+  }, [currentLevelIdx, gravityInverted]);
 
   const triggerShake = useCallback((intensity: number, duration: number = 200) => {
     setShakeAmount(intensity);
@@ -86,7 +87,8 @@ const App: React.FC = () => {
 
   const initLevel = useCallback((idx: number) => {
     const level = LEVELS[idx];
-    playerRef.current = { ...playerRef.current, x: 50, y: 300, vx: 0, vy: 0, scale: 1 };
+    const startY = level.mechanic === 'GRAVITY_SWAP' ? 50 : 300;
+    playerRef.current = { ...playerRef.current, x: 50, y: startY, vx: 0, vy: 0, scale: 1 };
     setDoorOpen(level.mechanic !== 'SHY_BUTTON');
     setShowHelp(false);
     setDadaVerdict(null);
@@ -109,75 +111,125 @@ const App: React.FC = () => {
       { x: 720, y: 280, width: 50, height: 100, color: COLORS.RED, vx: 0, vy: 0, type: 'GOAL' }
     ];
 
-    // Obstacles
-    if (idx > 1) platforms.push({ 
-      x: 300, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
-    });
-    if (idx > 5) platforms.push({ 
-      x: 500, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
-    });
-    
-    if (idx === 15) { // Labirinto do Ócio (Fase 16)
-      platforms.push({ x: 150, y: 280, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
-      platforms.push({ x: 300, y: 220, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
-      platforms.push({ x: 450, y: 160, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+    // MECÂNICAS MELHORADAS E NECESSÁRIAS:
+
+    // Fase 6 (SIZE_SHIFT) - Plataformas que exigem mudança de tamanho
+    if (idx === 5) { // Fase 6
+      platforms.push({ 
+        x: 200, y: 350, width: 40, height: 10, color: '#ff5555', vx: 0, vy: 0, type: 'TRAP', isSolid: true 
+      });
+      platforms.push({ 
+        x: 400, y: 350, width: 40, height: 10, color: '#ff5555', vx: 0, vy: 0, type: 'TRAP', isSolid: true 
+      });
+      // Vão pequeno que só pode passar quando pequeno
+      platforms[1] = { x: 750, y: 320, width: 30, height: 60, color: COLORS.RED, vx: 0, vy: 0, type: 'GOAL' };
     }
     
+    // Obstáculos básicos
+    if (idx >= 2 && idx !== 5) {
+      platforms.push({ 
+        x: 300, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
+      });
+    }
+    
+    if (idx >= 6 && idx !== 15) {
+      platforms.push({ 
+        x: 500, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
+      });
+    }
+    
+    // Fase 16 - Labirinto do Ócio com plataformas que caem
+    if (idx === 15) {
+      platforms.push({ 
+        x: 150, y: 280, width: 80, height: 20, color: '#d4a373', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true,
+        fallTimer: 0 // Nova propriedade
+      });
+      platforms.push({ 
+        x: 300, y: 220, width: 80, height: 20, color: '#d4a373', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true,
+        fallTimer: 0
+      });
+      platforms.push({ 
+        x: 450, y: 160, width: 80, height: 20, color: '#d4a373', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true,
+        fallTimer: 0
+      });
+      // Remove a plataforma do meio para forçar pulo
+      platforms[0] = { x: 0, y: 380, width: 200, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true };
+      platforms.push({ x: 600, y: 380, width: 200, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+    }
+    
+    // SHY_BUTTON - Botão realmente foge
     if (level.mechanic === 'SHY_BUTTON') {
       platforms.push({ 
-        x: 400, y: 200, width: 40, height: 40, color: COLORS.BLUE, vx: 0, vy: 0, type: 'BUTTON', isSolid: false 
+        x: 600, y: 250, width: 40, height: 40, color: COLORS.BLUE, vx: 0, vy: 0, type: 'BUTTON', isSolid: false 
       });
+      // Porta trancada inicialmente
+      setDoorOpen(false);
     }
     
+    // INVISIBLE_WALLS - Múltiplas paredes invisíveis
     if (level.mechanic === 'INVISIBLE_WALLS') {
       platforms.push({ 
-        x: 350, y: 150, width: 40, height: 230, color: 'transparent', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true 
+        x: 250, y: 200, width: 30, height: 180, color: 'transparent', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true 
+      });
+      platforms.push({ 
+        x: 450, y: 150, width: 30, height: 230, color: 'transparent', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true 
       });
     }
     
+    // PHANTOM_PLATFORMS - Agora alterna entre sólida e fantasma
     if (level.mechanic === 'PHANTOM_PLATFORMS') {
       platforms.push({ 
-        x: 200, y: 250, width: 400, height: 20, color: COLORS.GOLD, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true 
+        x: 250, y: 300, width: 300, height: 20, color: COLORS.GOLD, vx: 0, vy: 0, type: 'PLATFORM', isSolid: false,
+        phantomTimer: 0
       });
     }
     
+    // GLITCH_MAZE - Agora com plataformas que desaparecem/reaparecem
     if (level.mechanic === 'GLITCH_MAZE') {
-      // Adiciona plataformas glitchadas
-      for (let i = 0; i < 5; i++) {
+      // Cria um labirinto de plataformas glitchadas
+      const glitchPositions = [
+        { x: 200, y: 320 }, { x: 350, y: 280 }, { x: 500, y: 240 },
+        { x: 280, y: 200 }, { x: 430, y: 160 }, { x: 580, y: 120 }
+      ];
+      
+      glitchPositions.forEach(pos => {
         const isSolid = Math.random() > 0.5;
         platforms.push({
-          x: 150 + i * 120,
-          y: 200 + Math.random() * 100,
+          x: pos.x,
+          y: pos.y,
           width: 60,
-          height: 20,
-          color: isSolid ? COLORS.INK : COLORS.BLUE,
+          height: 15,
+          color: isSolid ? '#2a4d69' : '#ff6b6b',
           vx: 0,
           vy: 0,
           type: 'PLATFORM',
-          isSolid: isSolid
+          isSolid: isSolid,
+          glitchTimer: 0
         });
-      }
+      });
       
-      // Configura intervalo para alternar glitch
+      // Glitch mais rápido (500ms)
       glitchIntervalRef.current = setInterval(() => {
         setGlitchActive(prev => !prev);
-        // Atualiza solididade das plataformas glitchadas
         entitiesRef.current.forEach((ent, index) => {
-          if (ent.type === 'PLATFORM' && index >= 2) { // Apenas as plataformas adicionais
-            ent.isSolid = Math.random() > 0.5;
-            ent.color = ent.isSolid ? COLORS.INK : COLORS.BLUE;
+          if (ent.type === 'PLATFORM' && index >= 2) {
+            if (Math.random() > 0.7) { // 30% chance de mudar
+              ent.isSolid = !ent.isSolid;
+              ent.color = ent.isSolid ? '#2a4d69' : '#ff6b6b';
+            }
           }
         });
-      }, 1000);
+      }, 500);
     }
     
+    // BOSS_FIGHT - Mais projéteis, mais difícil
     if (level.mechanic === 'BOSS_FIGHT') {
       platforms[1] = { 
-        x: 600, 
-        y: 150, 
-        width: 60, 
-        height: 120, 
-        color: COLORS.RED, 
+        x: 650, 
+        y: 100, 
+        width: 80, 
+        height: 140, 
+        color: '#8B0000', 
         vx: 0, 
         vy: 0, 
         type: 'GOAL', 
@@ -227,6 +279,15 @@ const App: React.FC = () => {
         x: (e.clientX - rect.left) * scaleX, 
         y: (e.clientY - rect.top) * scaleY 
       };
+      
+      // Mostra/oculta cursor baseado na posição
+      const isOverCanvas = e.clientX >= rect.left && e.clientX <= rect.right &&
+                          e.clientY >= rect.top && e.clientY <= rect.bottom;
+      
+      if (isOverCanvas !== mouseVisibleRef.current) {
+        mouseVisibleRef.current = isOverCanvas;
+        canvas.style.cursor = isOverCanvas ? 'none' : 'default';
+      }
     }
   };
 
@@ -298,21 +359,24 @@ const App: React.FC = () => {
     const level = LEVELS[currentLevelIdx];
     const speed = 5;
     
-    // Mecânica SIZE_SHIFT
+    // Mecânica SIZE_SHIFT - Alterna a cada 1.5 segundos
     if (level.mechanic === 'SIZE_SHIFT') {
-      const scaleTime = Math.floor(time / 2000) % 2;
-      p.scale = scaleTime === 0 ? 0.5 : 1.0;
+      const scaleTime = Math.floor(time / 1500) % 2;
+      p.scale = scaleTime === 0 ? 0.6 : 1.0;
+      // Ajusta hitbox baseada no scale
+      p.width = scaleTime === 0 ? 20 : 32;
+      p.height = scaleTime === 0 ? 30 : 48;
     }
     
-    // Mecânica SCREEN_SHAKE
+    // Mecânica SCREEN_SHAKE - Agora mais intensa
     if (level.mechanic === 'SCREEN_SHAKE') {
-      const shakeIntensity = 3 + Math.sin(time / 300) * 2;
+      const shakeIntensity = 5 + Math.sin(time / 200) * 3;
       setShakeAmount(shakeIntensity);
     }
     
-    // Mecânica GRAVITY_TICK
+    // Mecânica GRAVITY_TICK - Alterna mais rápido
     if (level.mechanic === 'GRAVITY_TICK') {
-      if (Math.floor(time / 2000) % 2 === 0) setGravityInverted(false);
+      if (Math.floor(time / 1500) % 2 === 0) setGravityInverted(false);
       else setGravityInverted(true);
     }
 
@@ -335,7 +399,7 @@ const App: React.FC = () => {
 
     let deltaMultiplier = 1;
     if (level.mechanic === 'TIME_DILATION') {
-      deltaMultiplier = Math.max(0.1, 1 - (p.x / 800));
+      deltaMultiplier = Math.max(0.05, 1 - (p.x / 800)); // Mais lento no final
     }
 
     p.x += p.vx * deltaMultiplier;
@@ -351,8 +415,8 @@ const App: React.FC = () => {
       }
     }
 
-    // Boss Projectiles
-    if (level.mechanic === 'BOSS_FIGHT' && Math.random() < 0.02) {
+    // Boss Projectiles - Mais frequentes
+    if (level.mechanic === 'BOSS_FIGHT' && Math.random() < 0.03) {
       const goal = entitiesRef.current.find(e => e.type === 'GOAL');
       if (goal) {
         projectilesRef.current.push({
@@ -360,15 +424,15 @@ const App: React.FC = () => {
           y: goal.y + Math.random() * goal.height, 
           width: 15, 
           height: 15, 
-          color: COLORS.INK, 
-          vx: -5, 
-          vy: (Math.random() - 0.5) * 4, 
+          color: '#8B0000', 
+          vx: -6, // Mais rápido
+          vy: (Math.random() - 0.5) * 6, // Mais variado
           type: 'PROJECTILE'
         });
       }
     }
 
-    // Update projectiles (usando loop reverso para remoção segura)
+    // Update projectiles
     for (let i = projectilesRef.current.length - 1; i >= 0; i--) {
       const proj = projectilesRef.current[i];
       proj.x += proj.vx; 
@@ -395,8 +459,49 @@ const App: React.FC = () => {
     if (p.x + p.width > 800) p.x = 800 - p.width;
     if (p.y < -200 || p.y > 600) die();
 
+    // Mecânica LABIRINTO DO ÓCIO - Plataformas caem após tempo
+    if (level.mechanic === 'NORMAL' && level.id === 16) {
+      entitiesRef.current.forEach((ent, index) => {
+        if (ent.type === 'PLATFORM' && index >= 2 && 'fallTimer' in ent) {
+          const playerOnPlatform = p.x < ent.x + ent.width && 
+                                  p.x + p.width > ent.x && 
+                                  p.y + p.height >= ent.y && 
+                                  p.y + p.height <= ent.y + 5;
+          
+          if (playerOnPlatform) {
+            (ent as any).fallTimer += dt;
+            if ((ent as any).fallTimer > 1000) { // Cai após 1 segundo
+              ent.y += 5; // Cai lentamente
+              if (ent.y > 400) {
+                entitiesRef.current.splice(index, 1);
+              }
+            }
+          } else {
+            (ent as any).fallTimer = 0;
+          }
+        }
+      });
+    }
+
+    // Mecânica PHANTOM_PLATFORMS - Alterna estado
+    if (level.mechanic === 'PHANTOM_PLATFORMS') {
+      entitiesRef.current.forEach((ent, index) => {
+        if (ent.type === 'PLATFORM' && index >= 2) {
+          if (!('phantomTimer' in ent)) (ent as any).phantomTimer = 0;
+          (ent as any).phantomTimer += dt;
+          
+          // Alterna a cada 1.5 segundos
+          if ((ent as any).phantomTimer > 1500) {
+            ent.isSolid = !ent.isSolid;
+            ent.color = ent.isSolid ? COLORS.GOLD : '#ff6b6b';
+            (ent as any).phantomTimer = 0;
+          }
+        }
+      });
+    }
+
     // Check collisions with entities
-    entitiesRef.current.forEach(ent => {
+    entitiesRef.current.forEach((ent, index) => {
       const isColliding = p.x < ent.x + ent.width && 
                          p.x + p.width > ent.x && 
                          p.y < ent.y + ent.height && 
@@ -404,15 +509,19 @@ const App: React.FC = () => {
       
       if (isColliding) {
         if (ent.type === 'PLATFORM') {
+          let shouldCollide = ent.isSolid !== false;
+          
           // Para GLITCH_MAZE, verifica a solididade atual
-          let shouldCollide = true;
           if (level.mechanic === 'GLITCH_MAZE') {
             shouldCollide = glitchActive ? ent.isSolid : true;
           }
           
-          const phantomActive = level.mechanic === 'PHANTOM_PLATFORMS' && Math.abs(p.vy) > 1;
+          // Para PHANTOM_PLATFORMS, só colide se sólida
+          if (level.mechanic === 'PHANTOM_PLATFORMS') {
+            shouldCollide = ent.isSolid === true;
+          }
           
-          if (shouldCollide && !phantomActive) {
+          if (shouldCollide) {
             if (p.vy > 0 && p.y < ent.y) { 
               p.y = ent.y - p.height; 
               p.vy = 0; 
@@ -429,7 +538,20 @@ const App: React.FC = () => {
         }
         
         if (ent.type === 'GOAL' && doorOpen && level.id !== 9 && level.mechanic !== 'DUAL_CONTACT') {
-          if (level.mechanic === 'BOSS_FIGHT') {
+          // SIZE_SHIFT - Só pode passar se estiver pequeno
+          if (level.mechanic === 'SIZE_SHIFT') {
+            if (p.scale && p.scale < 0.7) {
+              if (currentLevelIdx === LEVELS.length - 1) {
+                setGameState(GameState.WIN_TROLL);
+              } else {
+                setCurrentLevelIdx(prev => prev + 1);
+              }
+            } else {
+              // Feedback de que precisa estar pequeno
+              triggerShake(3);
+              p.x -= 20; // Empurra para trás
+            }
+          } else if (level.mechanic === 'BOSS_FIGHT') {
             const currentTime = Date.now();
             if (currentTime - bossLastHitTime > 500) {
               setBossLastHitTime(currentTime);
@@ -440,15 +562,11 @@ const App: React.FC = () => {
                 
                 if (newHealth <= 0) {
                   setTimeout(() => {
-                    if (currentLevelIdx === LEVELS.length - 1) {
-                      setGameState(GameState.WIN_TROLL);
-                    } else {
-                      setCurrentLevelIdx(prev => prev + 1);
-                    }
+                    setGameState(GameState.WIN_TROLL);
                   }, 1000);
                 } else {
-                  const newBossX = Math.random() * 500 + 200;
-                  const newBossY = Math.random() * 200 + 50;
+                  const newBossX = Math.random() * 400 + 200;
+                  const newBossY = Math.random() * 150 + 50;
                   ent.x = newBossX;
                   ent.y = newBossY;
                   
@@ -472,26 +590,27 @@ const App: React.FC = () => {
         if (ent.type === 'BUTTON') { 
           setDoorOpen(true); 
           ent.color = COLORS.GOLD; 
+          triggerShake(5);
         }
       }
 
-      // Shy button mechanic
+      // Shy button mechanic - Agora mais agressivo
       if (ent.type === 'BUTTON' && level.mechanic === 'SHY_BUTTON') {
         const dx = ent.x + ent.width/2 - mouseRef.current.x;
         const dy = ent.y + ent.height/2 - mouseRef.current.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 150) {
-          ent.x += (dx/dist) * 10; 
-          ent.y += (dy/dist) * 10;
+        if (dist < 200) { // Maior área de fuga
+          ent.x += (dx/dist) * 15; // Foge mais rápido
+          ent.y += (dy/dist) * 15;
           if (ent.x < 0 || ent.x > 760) ent.x = Math.random() * 700;
           if (ent.y < 0 || ent.y > 340) ent.y = Math.random() * 300;
         }
       }
 
-      // Drifting door mechanic
+      // Drifting door mechanic - Movimento mais complexo
       if (ent.type === 'GOAL' && level.mechanic === 'DRIFTING_DOOR') {
-        ent.y = 150 + Math.sin(time / 500) * 100;
-        ent.x = 600 + Math.cos(time / 1000) * 100;
+        ent.y = 150 + Math.sin(time / 400) * 120;
+        ent.x = 600 + Math.cos(time / 800) * 150;
       }
     });
 
@@ -509,19 +628,22 @@ const App: React.FC = () => {
     ctx.fillStyle = currentLevel.bgColor || COLORS.PAPER;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Desenha trail de luz para GLITCH_MAZE
+    // Desenha trail de luz para GLITCH_MAZE (apenas quando não sólido)
     if (currentLevel.mechanic === 'GLITCH_MAZE') {
       ctx.save();
-      ctx.globalAlpha = 0.3;
+      ctx.globalAlpha = 0.4;
       ctx.strokeStyle = '#ffff00';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([5, 5]);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 5]);
       ctx.beginPath();
+      // Caminho seguro através das plataformas
       ctx.moveTo(100, 350);
-      ctx.lineTo(250, 250);
-      ctx.lineTo(400, 200);
-      ctx.lineTo(550, 300);
-      ctx.lineTo(700, 280);
+      ctx.lineTo(200, 320);
+      ctx.lineTo(350, 280);
+      ctx.lineTo(280, 200);
+      ctx.lineTo(430, 160);
+      ctx.lineTo(580, 120);
+      ctx.lineTo(700, 180);
       ctx.stroke();
       ctx.restore();
     }
@@ -535,7 +657,7 @@ const App: React.FC = () => {
         ctx.rotate(Math.sin(time) * 0.1);
         
         if (doorOpen) {
-          ctx.fillStyle = COLORS.RED;
+          ctx.fillStyle = currentLevel.mechanic === 'BOSS_FIGHT' ? '#8B0000' : COLORS.RED;
           ctx.beginPath(); 
           ctx.ellipse(0, 0, ent.width/2, ent.height/2, 0, 0, Math.PI * 2); 
           ctx.fill();
@@ -559,19 +681,38 @@ const App: React.FC = () => {
         } else {
           ctx.fillStyle = '#444';
           ctx.fillRect(-ent.width/2, -ent.height/2, ent.width, ent.height);
+          // Cadeado
+          ctx.fillStyle = COLORS.GOLD;
+          ctx.fillRect(-10, -5, 20, 15);
+          ctx.beginPath();
+          ctx.arc(0, -5, 8, 0, Math.PI);
+          ctx.fill();
         }
         ctx.restore();
       } else if (ent.type === 'PLATFORM') {
         if (ent.color !== 'transparent') {
+          // Plataforma fantasma pisca
+          if (currentLevel.mechanic === 'PHANTOM_PLATFORMS' && !ent.isSolid) {
+            const alpha = 0.3 + Math.sin(Date.now() / 200) * 0.3;
+            ctx.globalAlpha = alpha;
+          }
+          
           ctx.fillStyle = ent.color;
           ctx.fillRect(ent.x, ent.y, ent.width, ent.height);
           
-          if (currentLevel.mechanic === 'GLITCH_MAZE' && !ent.isSolid) {
-            ctx.strokeStyle = '#ff0000';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([3, 3]);
-            ctx.strokeRect(ent.x, ent.y, ent.width, ent.height);
-            ctx.setLineDash([]);
+          // Indicador visual para plataformas glitch
+          if (currentLevel.mechanic === 'GLITCH_MAZE') {
+            if (!ent.isSolid) {
+              ctx.strokeStyle = '#ff0000';
+              ctx.lineWidth = 2;
+              ctx.setLineDash([3, 3]);
+              ctx.strokeRect(ent.x, ent.y, ent.width, ent.height);
+              ctx.setLineDash([]);
+            } else {
+              ctx.strokeStyle = '#00ff00';
+              ctx.lineWidth = 2;
+              ctx.strokeRect(ent.x, ent.y, ent.width, ent.height);
+            }
           } else {
             ctx.strokeStyle = '#fff'; 
             ctx.lineWidth = 1;
@@ -580,9 +721,11 @@ const App: React.FC = () => {
             ctx.lineTo(ent.x + ent.width, ent.y + ent.height/2); 
             ctx.stroke();
           }
+          
+          ctx.globalAlpha = 1.0;
         }
       } else if (ent.type === 'TRAP') {
-        ctx.fillStyle = COLORS.INK;
+        ctx.fillStyle = ent.color;
         for(let i = 0; i < ent.width; i += 10) {
           ctx.beginPath(); 
           ctx.moveTo(ent.x + i, ent.y + ent.height); 
@@ -602,6 +745,14 @@ const App: React.FC = () => {
       ctx.beginPath();
       ctx.arc(p.x + p.width/2, p.y + p.height/2, p.width/2, 0, Math.PI * 2);
       ctx.fill();
+      
+      // Rastro do projétil
+      ctx.strokeStyle = '#ff5555';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x + p.width/2, p.y + p.height/2);
+      ctx.lineTo(p.x + p.width/2 + p.vx * 2, p.y + p.height/2 + p.vy * 2);
+      ctx.stroke();
     });
 
     // Draw player
@@ -612,18 +763,30 @@ const App: React.FC = () => {
     // Aplica scale para SIZE_SHIFT
     if (p.scale && p.scale !== 1) {
       ctx.scale(p.scale, p.scale);
+      // Efeito visual quando pequeno
+      ctx.shadowColor = '#00ffff';
+      ctx.shadowBlur = 10;
     }
     
     ctx.fillStyle = p.color;
     ctx.fillRect(-p.width/2, -p.height/2, p.width, p.height);
     ctx.fillStyle = COLORS.WHITE;
     ctx.beginPath(); 
-    ctx.arc(0, -p.height/4, 12, 0, Math.PI * 2); 
+    ctx.arc(0, -p.height/4, p.scale && p.scale < 1 ? 8 : 12, 0, Math.PI * 2); 
     ctx.fill();
     ctx.fillStyle = COLORS.INK;
     ctx.beginPath(); 
-    ctx.arc(0, -p.height/4, 4, 0, Math.PI * 2); 
+    ctx.arc(0, -p.height/4, p.scale && p.scale < 1 ? 3 : 4, 0, Math.PI * 2); 
     ctx.fill();
+    
+    // Indicador de tamanho para SIZE_SHIFT
+    if (currentLevel.mechanic === 'SIZE_SHIFT') {
+      ctx.fillStyle = p.scale && p.scale < 1 ? '#00ff00' : '#ff5555';
+      ctx.font = 'bold 10px Courier';
+      ctx.textAlign = 'center';
+      ctx.fillText(p.scale && p.scale < 1 ? 'PEQUENO' : 'NORMAL', 0, -p.height/2 - 10);
+    }
+    
     ctx.restore();
   };
 
@@ -757,6 +920,7 @@ const App: React.FC = () => {
                   }`}
                 >
                   {lvl.id}
+                  <span className="text-xs mt-1">{lvl.title.split(' ')[0]}</span>
                 </button>
               );
             })}
@@ -818,13 +982,15 @@ const App: React.FC = () => {
               width={800} 
               height={400} 
               className="w-full h-auto aspect-[2/1] bg-white cursor-none"
+              style={{ cursor: 'none' }}
             />
 
-            {!isMobile && (
+            {!isMobile && mouseVisibleRef.current && (
               <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
                 style={{ 
-                  left: mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0) / (800 / (canvasRef.current?.clientWidth || 800)) - 20, 
-                  top: mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0) / (400 / (canvasRef.current?.clientHeight || 400)) - 20 
+                  left: (mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0)) - 20, 
+                  top: (mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0)) - 20,
+                  pointerEvents: 'none'
                 }}
               >👁️‍🗨️</div>
             )}
