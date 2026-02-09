@@ -1,3 +1,4 @@
+// App.tsx COMPLETO E CORRIGIDO
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GameState, LevelConfig, Entity } from './types';
 import { LEVELS, COLORS, DADA_RESPONSES } from './constants';
@@ -23,10 +24,18 @@ const App: React.FC = () => {
   const [gravityInverted, setGravityInverted] = useState(false);
   const [bossHealth, setBossHealth] = useState(3);
   const [bossLastHitTime, setBossLastHitTime] = useState<number>(0);
+  const [glitchActive, setGlitchActive] = useState(false);
+  const [touchControls, setTouchControls] = useState({
+    left: false,
+    right: false,
+    jump: false
+  });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
   const lastUpdateRef = useRef<number>(0);
+  const shakeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const glitchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   const playerRef = useRef<Entity>({
     x: 50, y: 300, width: 32, height: 48, color: COLORS.INK, vx: 0, vy: 0, type: 'PLAYER', scale: 1
@@ -68,6 +77,13 @@ const App: React.FC = () => {
     }
   }, [currentLevelIdx]);
 
+  const triggerShake = useCallback((intensity: number, duration: number = 200) => {
+    setShakeAmount(intensity);
+    if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+    const timer = setTimeout(() => setShakeAmount(0), duration);
+    shakeTimerRef.current = timer;
+  }, []);
+
   const initLevel = useCallback((idx: number) => {
     const level = LEVELS[idx];
     playerRef.current = { ...playerRef.current, x: 50, y: 300, vx: 0, vy: 0, scale: 1 };
@@ -79,24 +95,82 @@ const App: React.FC = () => {
     setBossHealth(3);
     setBossLastHitTime(0);
     setShakeAmount(0);
+    setGlitchActive(false);
     projectilesRef.current = [];
     
+    // Clear any existing intervals
+    if (glitchIntervalRef.current) {
+      clearInterval(glitchIntervalRef.current);
+      glitchIntervalRef.current = null;
+    }
+    
     const platforms: Entity[] = [
-      { x: 0, y: 380, width: 800, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM' },
+      { x: 0, y: 380, width: 800, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true },
       { x: 720, y: 280, width: 50, height: 100, color: COLORS.RED, vx: 0, vy: 0, type: 'GOAL' }
     ];
 
     // Obstacles
-    if (idx > 1) platforms.push({ x: 300, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP' });
-    if (idx > 5) platforms.push({ x: 500, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP' });
+    if (idx > 1) platforms.push({ 
+      x: 300, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
+    });
+    if (idx > 5) platforms.push({ 
+      x: 500, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
+    });
+    
     if (idx === 15) { // Labirinto do Ócio (Fase 16)
-        platforms.push({ x: 150, y: 280, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM' });
-        platforms.push({ x: 300, y: 220, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM' });
-        platforms.push({ x: 450, y: 160, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM' });
+      platforms.push({ x: 150, y: 280, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+      platforms.push({ x: 300, y: 220, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+      platforms.push({ x: 450, y: 160, width: 80, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
     }
-    if (level.mechanic === 'SHY_BUTTON') platforms.push({ x: 400, y: 200, width: 40, height: 40, color: COLORS.BLUE, vx: 0, vy: 0, type: 'BUTTON' });
-    if (level.mechanic === 'INVISIBLE_WALLS') platforms.push({ x: 350, y: 150, width: 40, height: 230, color: 'transparent', vx: 0, vy: 0, type: 'PLATFORM' });
-    if (level.mechanic === 'PHANTOM_PLATFORMS') platforms.push({ x: 200, y: 250, width: 400, height: 20, color: COLORS.GOLD, vx: 0, vy: 0, type: 'PLATFORM' });
+    
+    if (level.mechanic === 'SHY_BUTTON') {
+      platforms.push({ 
+        x: 400, y: 200, width: 40, height: 40, color: COLORS.BLUE, vx: 0, vy: 0, type: 'BUTTON', isSolid: false 
+      });
+    }
+    
+    if (level.mechanic === 'INVISIBLE_WALLS') {
+      platforms.push({ 
+        x: 350, y: 150, width: 40, height: 230, color: 'transparent', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true 
+      });
+    }
+    
+    if (level.mechanic === 'PHANTOM_PLATFORMS') {
+      platforms.push({ 
+        x: 200, y: 250, width: 400, height: 20, color: COLORS.GOLD, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true 
+      });
+    }
+    
+    if (level.mechanic === 'GLITCH_MAZE') {
+      // Adiciona plataformas glitchadas
+      for (let i = 0; i < 5; i++) {
+        const isSolid = Math.random() > 0.5;
+        platforms.push({
+          x: 150 + i * 120,
+          y: 200 + Math.random() * 100,
+          width: 60,
+          height: 20,
+          color: isSolid ? COLORS.INK : COLORS.BLUE,
+          vx: 0,
+          vy: 0,
+          type: 'PLATFORM',
+          isSolid: isSolid
+        });
+      }
+      
+      // Configura intervalo para alternar glitch
+      glitchIntervalRef.current = setInterval(() => {
+        setGlitchActive(prev => !prev);
+        // Atualiza solididade das plataformas glitchadas
+        entitiesRef.current.forEach((ent, index) => {
+          if (ent.type === 'PLATFORM' && index >= 2) { // Apenas as plataformas adicionais
+            ent.isSolid = Math.random() > 0.5;
+            ent.color = ent.isSolid ? COLORS.INK : COLORS.BLUE;
+          }
+        });
+      }, 1000);
+    }
+    
     if (level.mechanic === 'BOSS_FIGHT') {
       platforms[1] = { 
         x: 600, 
@@ -117,11 +191,31 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (gameState === GameState.PLAYING) initLevel(currentLevelIdx);
+    return () => {
+      if (glitchIntervalRef.current) {
+        clearInterval(glitchIntervalRef.current);
+        glitchIntervalRef.current = null;
+      }
+    };
   }, [gameState, currentLevelIdx, initLevel]);
 
-  const handleKeyDown = (e: KeyboardEvent) => { keysRef.current[e.code] = true; };
-  const handleKeyUp = (e: KeyboardEvent) => { keysRef.current[e.code] = false; };
-  const handleTouchControl = (key: string, pressed: boolean) => { keysRef.current[key] = pressed; };
+  const handleKeyDown = (e: KeyboardEvent) => { 
+    keysRef.current[e.code] = true; 
+  };
+  
+  const handleKeyUp = (e: KeyboardEvent) => { 
+    keysRef.current[e.code] = false; 
+  };
+  
+  const handleTouchControl = (key: string, pressed: boolean) => { 
+    keysRef.current[key] = pressed; 
+    setTouchControls(prev => ({
+      ...prev,
+      left: key === 'TouchLeft' ? pressed : prev.left,
+      right: key === 'TouchRight' ? pressed : prev.right,
+      jump: key === 'TouchJump' ? pressed : prev.jump
+    }));
+  };
 
   const handleMouseMove = (e: MouseEvent) => {
     const canvas = canvasRef.current;
@@ -129,45 +223,74 @@ const App: React.FC = () => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      mouseRef.current = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+      mouseRef.current = { 
+        x: (e.clientX - rect.left) * scaleX, 
+        y: (e.clientY - rect.top) * scaleY 
+      };
     }
   };
 
-  const handleMouseDown = (e: MouseEvent) => {
-    if (currentLevel.mechanic === 'DUAL_CONTACT') {
-        const goal = entitiesRef.current.find(ent => ent.type === 'GOAL');
-        const p = playerRef.current;
-        if (goal) {
-            const mouseOverGoal = mouseRef.current.x > goal.x && mouseRef.current.x < goal.x + goal.width && mouseRef.current.y > goal.y && mouseRef.current.y < goal.y + goal.height;
-            const playerTouchingGoal = p.x < goal.x + goal.width && p.x + p.width > goal.x && p.y < goal.y + goal.height && p.y + p.height > goal.y;
-            if (mouseOverGoal && playerTouchingGoal) {
-                if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
-                else setCurrentLevelIdx(prev => prev + 1);
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    if (currentLevel.mechanic === 'DUAL_CONTACT' && gameState === GameState.PLAYING) {
+      const goal = entitiesRef.current.find(ent => ent.type === 'GOAL');
+      const p = playerRef.current;
+      
+      if (goal && canvasRef.current) {
+        const rect = canvasRef.current.getBoundingClientRect();
+        const scaleX = canvasRef.current.width / rect.width;
+        const scaleY = canvasRef.current.height / rect.height;
+        
+        const mouseX = (e.clientX - rect.left) * scaleX;
+        const mouseY = (e.clientY - rect.top) * scaleY;
+        
+        const mouseOverGoal = mouseX > goal.x && 
+                             mouseX < goal.x + goal.width && 
+                             mouseY > goal.y && 
+                             mouseY < goal.y + goal.height;
+        
+        const playerTouchingGoal = p.x < goal.x + goal.width && 
+                                  p.x + p.width > goal.x && 
+                                  p.y < goal.y + goal.height && 
+                                  p.y + p.height > goal.y;
+        
+        if (mouseOverGoal && playerTouchingGoal) {
+          triggerShake(5);
+          goal.color = COLORS.GOLD;
+          
+          setTimeout(() => {
+            if (currentLevelIdx === LEVELS.length - 1) {
+              setGameState(GameState.WIN_TROLL);
+            } else {
+              setCurrentLevelIdx(prev => prev + 1);
             }
+          }, 500);
+        } else if (mouseOverGoal || playerTouchingGoal) {
+          triggerShake(2);
         }
+      }
     }
-  };
+  }, [currentLevel.mechanic, currentLevelIdx, gameState, triggerShake]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mousedown', handleMouseDown);
+    
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mousedown', handleMouseDown);
     };
-  }, [currentLevelIdx]);
-
-  const triggerShake = useCallback((intensity: number) => {
-    setShakeAmount(intensity);
-    setTimeout(() => setShakeAmount(0), 200);
-  }, []);
+  }, [handleMouseDown]);
 
   const update = useCallback((time: number) => {
-    if (gameState !== GameState.PLAYING) return;
+    if (gameState !== GameState.PLAYING) {
+      requestRef.current = requestAnimationFrame(update);
+      return;
+    }
+    
     const dt = time - lastUpdateRef.current;
     lastUpdateRef.current = time;
 
@@ -175,10 +298,22 @@ const App: React.FC = () => {
     const level = LEVELS[currentLevelIdx];
     const speed = 5;
     
-    // Gravity Ticking mechanic
+    // Mecânica SIZE_SHIFT
+    if (level.mechanic === 'SIZE_SHIFT') {
+      const scaleTime = Math.floor(time / 2000) % 2;
+      p.scale = scaleTime === 0 ? 0.5 : 1.0;
+    }
+    
+    // Mecânica SCREEN_SHAKE
+    if (level.mechanic === 'SCREEN_SHAKE') {
+      const shakeIntensity = 3 + Math.sin(time / 300) * 2;
+      setShakeAmount(shakeIntensity);
+    }
+    
+    // Mecânica GRAVITY_TICK
     if (level.mechanic === 'GRAVITY_TICK') {
-        if (Math.floor(time / 2000) % 2 === 0) setGravityInverted(false);
-        else setGravityInverted(true);
+      if (Math.floor(time / 2000) % 2 === 0) setGravityInverted(false);
+      else setGravityInverted(true);
     }
 
     let gravity = gravityInverted ? -0.4 : 0.4;
@@ -192,62 +327,68 @@ const App: React.FC = () => {
     p.vx = moveX * speed;
     if (level.mechanic === 'WIND_AFFECTED') p.vx -= 3;
     if (level.mechanic === 'MOVE_ONLY_IF_MOVE' && moveX === 0) {
-        gravity = 0;
-        p.vy = 0;
+      gravity = 0;
+      p.vy = 0;
     }
 
     p.vy += gravity;
 
     let deltaMultiplier = 1;
-    if (level.mechanic === 'TIME_DILATION') deltaMultiplier = Math.max(0.1, 1 - (p.x / 800));
+    if (level.mechanic === 'TIME_DILATION') {
+      deltaMultiplier = Math.max(0.1, 1 - (p.x / 800));
+    }
 
     p.x += p.vx * deltaMultiplier;
     p.y += p.vy * deltaMultiplier;
 
     if (keysRef.current['ArrowUp'] || keysRef.current['Space'] || keysRef.current['KeyW'] || keysRef.current['TouchJump']) {
       const onFloor = gravityInverted ? p.y <= 10 : p.y >= 330;
-      if (onFloor || Math.abs(p.vy) < 0.8) p.vy = jumpPower;
+      if (onFloor || Math.abs(p.vy) < 0.8) {
+        p.vy = jumpPower;
+        if (level.mechanic === 'PHANTOM_PLATFORMS') {
+          triggerShake(3, 100);
+        }
+      }
     }
 
     // Boss Projectiles
     if (level.mechanic === 'BOSS_FIGHT' && Math.random() < 0.02) {
-        const goal = entitiesRef.current.find(e => e.type === 'GOAL');
-        if (goal) {
-            projectilesRef.current.push({
-                x: goal.x, 
-                y: goal.y + Math.random() * goal.height, 
-                width: 15, 
-                height: 15, 
-                color: COLORS.INK, 
-                vx: -5, 
-                vy: (Math.random() - 0.5) * 4, 
-                type: 'PROJECTILE'
-            });
-        }
+      const goal = entitiesRef.current.find(e => e.type === 'GOAL');
+      if (goal) {
+        projectilesRef.current.push({
+          x: goal.x, 
+          y: goal.y + Math.random() * goal.height, 
+          width: 15, 
+          height: 15, 
+          color: COLORS.INK, 
+          vx: -5, 
+          vy: (Math.random() - 0.5) * 4, 
+          type: 'PROJECTILE'
+        });
+      }
     }
 
-    // Update projectiles
-    projectilesRef.current.forEach((proj, idx) => {
-        proj.x += proj.vx; 
-        proj.y += proj.vy;
-        
-        // Remove projectiles that go off screen
-        if (proj.x < -20 || proj.x > 820 || proj.y < -20 || proj.y > 420) {
-          projectilesRef.current.splice(idx, 1);
-          return;
-        }
-        
-        // Check collision with player
-        if (p.x < proj.x + proj.width && 
-            p.x + p.width > proj.x && 
-            p.y < proj.y + proj.height && 
-            p.y + p.height > proj.y) {
-          // Trigger screen shake when player is hit
-          triggerShake(10);
-          die();
-          return;
-        }
-    });
+    // Update projectiles (usando loop reverso para remoção segura)
+    for (let i = projectilesRef.current.length - 1; i >= 0; i--) {
+      const proj = projectilesRef.current[i];
+      proj.x += proj.vx; 
+      proj.y += proj.vy;
+      
+      if (proj.x < -50 || proj.x > 850 || proj.y < -50 || proj.y > 450) {
+        projectilesRef.current.splice(i, 1);
+        continue;
+      }
+      
+      if (p.x < proj.x + proj.width && 
+          p.x + p.width > proj.x && 
+          p.y < proj.y + proj.height && 
+          p.y + p.height > proj.y) {
+        triggerShake(10);
+        projectilesRef.current.splice(i, 1);
+        die();
+        break;
+      }
+    }
 
     // Screen boundaries
     if (p.x < 0) p.x = 0;
@@ -263,8 +404,15 @@ const App: React.FC = () => {
       
       if (isColliding) {
         if (ent.type === 'PLATFORM') {
+          // Para GLITCH_MAZE, verifica a solididade atual
+          let shouldCollide = true;
+          if (level.mechanic === 'GLITCH_MAZE') {
+            shouldCollide = glitchActive ? ent.isSolid : true;
+          }
+          
           const phantomActive = level.mechanic === 'PHANTOM_PLATFORMS' && Math.abs(p.vy) > 1;
-          if (!phantomActive) {
+          
+          if (shouldCollide && !phantomActive) {
             if (p.vy > 0 && p.y < ent.y) { 
               p.y = ent.y - p.height; 
               p.vy = 0; 
@@ -282,18 +430,15 @@ const App: React.FC = () => {
         
         if (ent.type === 'GOAL' && doorOpen && level.id !== 9 && level.mechanic !== 'DUAL_CONTACT') {
           if (level.mechanic === 'BOSS_FIGHT') {
-            // Cooldown for boss hits (500ms)
             const currentTime = Date.now();
             if (currentTime - bossLastHitTime > 500) {
               setBossLastHitTime(currentTime);
               setBossHealth(prev => {
                 const newHealth = prev - 1;
                 
-                // Trigger stronger shake when boss is hit
                 triggerShake(15);
                 
                 if (newHealth <= 0) {
-                  // Boss defeated
                   setTimeout(() => {
                     if (currentLevelIdx === LEVELS.length - 1) {
                       setGameState(GameState.WIN_TROLL);
@@ -302,13 +447,11 @@ const App: React.FC = () => {
                     }
                   }, 1000);
                 } else {
-                  // Reposition boss and player
                   const newBossX = Math.random() * 500 + 200;
                   const newBossY = Math.random() * 200 + 50;
                   ent.x = newBossX;
                   ent.y = newBossY;
                   
-                  // Reset player position
                   p.x = 50;
                   p.y = 300;
                   p.vx = 0;
@@ -318,7 +461,6 @@ const App: React.FC = () => {
               });
             }
           } else {
-            // Normal level completion
             if (currentLevelIdx === LEVELS.length - 1) {
               setGameState(GameState.WIN_TROLL);
             } else {
@@ -355,7 +497,7 @@ const App: React.FC = () => {
 
     draw();
     requestRef.current = requestAnimationFrame(update);
-  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake]);
+  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake, glitchActive]);
 
   const draw = () => {
     const canvas = canvasRef.current;
@@ -363,10 +505,26 @@ const App: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Clear canvas with current background color
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = currentLevel.bgColor || COLORS.PAPER;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Desenha trail de luz para GLITCH_MAZE
+    if (currentLevel.mechanic === 'GLITCH_MAZE') {
+      ctx.save();
+      ctx.globalAlpha = 0.3;
+      ctx.strokeStyle = '#ffff00';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(100, 350);
+      ctx.lineTo(250, 250);
+      ctx.lineTo(400, 200);
+      ctx.lineTo(550, 300);
+      ctx.lineTo(700, 280);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Draw entities
     entitiesRef.current.forEach(ent => {
@@ -377,7 +535,6 @@ const App: React.FC = () => {
         ctx.rotate(Math.sin(time) * 0.1);
         
         if (doorOpen) {
-          // Draw boss/enemy
           ctx.fillStyle = COLORS.RED;
           ctx.beginPath(); 
           ctx.ellipse(0, 0, ent.width/2, ent.height/2, 0, 0, Math.PI * 2); 
@@ -393,7 +550,6 @@ const App: React.FC = () => {
           ctx.arc(Math.sin(time*2)*5, 0, 8, 0, Math.PI * 2); 
           ctx.fill();
           
-          // Draw boss health for boss fight
           if (currentLevel.mechanic === 'BOSS_FIGHT') {
             ctx.fillStyle = 'white';
             ctx.font = 'bold 20px Courier';
@@ -401,7 +557,6 @@ const App: React.FC = () => {
             ctx.fillText("HP:" + bossHealth, 0, -70);
           }
         } else {
-          // Draw locked door
           ctx.fillStyle = '#444';
           ctx.fillRect(-ent.width/2, -ent.height/2, ent.width, ent.height);
         }
@@ -410,16 +565,25 @@ const App: React.FC = () => {
         if (ent.color !== 'transparent') {
           ctx.fillStyle = ent.color;
           ctx.fillRect(ent.x, ent.y, ent.width, ent.height);
-          ctx.strokeStyle = '#fff'; 
-          ctx.lineWidth = 1;
-          ctx.beginPath(); 
-          ctx.moveTo(ent.x, ent.y + ent.height/2); 
-          ctx.lineTo(ent.x + ent.width, ent.y + ent.height/2); 
-          ctx.stroke();
+          
+          if (currentLevel.mechanic === 'GLITCH_MAZE' && !ent.isSolid) {
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 3]);
+            ctx.strokeRect(ent.x, ent.y, ent.width, ent.height);
+            ctx.setLineDash([]);
+          } else {
+            ctx.strokeStyle = '#fff'; 
+            ctx.lineWidth = 1;
+            ctx.beginPath(); 
+            ctx.moveTo(ent.x, ent.y + ent.height/2); 
+            ctx.lineTo(ent.x + ent.width, ent.y + ent.height/2); 
+            ctx.stroke();
+          }
         }
       } else if (ent.type === 'TRAP') {
         ctx.fillStyle = COLORS.INK;
-        for(let i=0; i<ent.width; i+=10) {
+        for(let i = 0; i < ent.width; i += 10) {
           ctx.beginPath(); 
           ctx.moveTo(ent.x + i, ent.y + ent.height); 
           ctx.lineTo(ent.x + i + 5, ent.y); 
@@ -444,6 +608,12 @@ const App: React.FC = () => {
     const p = playerRef.current;
     ctx.save();
     ctx.translate(p.x + p.width/2, p.y + p.height/2);
+    
+    // Aplica scale para SIZE_SHIFT
+    if (p.scale && p.scale !== 1) {
+      ctx.scale(p.scale, p.scale);
+    }
+    
     ctx.fillStyle = p.color;
     ctx.fillRect(-p.width/2, -p.height/2, p.width, p.height);
     ctx.fillStyle = COLORS.WHITE;
@@ -473,22 +643,36 @@ const App: React.FC = () => {
 
   const handleVerdictPredefined = () => {
     if (!playerInput.trim()) {
-        setDadaVerdict({ allow: false, reason: "O silêncio é a língua dos mortos. Tente gritar letras." });
-        return;
+      setDadaVerdict({ allow: false, reason: "O silêncio é a língua dos mortos. Tente gritar letras." });
+      return;
     }
     setIsLoading(true);
     setTimeout(() => {
-        setDadaVerdict({ allow: true, reason: DADA_RESPONSES[Math.floor(Math.random() * DADA_RESPONSES.length)] });
-        setIsLoading(false);
-        setTimeout(() => {
-            if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
-            else setCurrentLevelIdx(prev => prev + 1);
-        }, 1500);
+      setDadaVerdict({ allow: true, reason: DADA_RESPONSES[Math.floor(Math.random() * DADA_RESPONSES.length)] });
+      setIsLoading(false);
+      setTimeout(() => {
+        if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
+        else setCurrentLevelIdx(prev => prev + 1);
+      }, 1500);
     }, 800);
   };
 
   const handlePhaseCounterClick = () => {
-    if (currentLevel.id === 9) setCurrentLevelIdx(prev => prev + 1);
+    if (currentLevel.id === 9 && gameState === GameState.PLAYING) {
+      triggerShake(8);
+      
+      const phaseElement = document.querySelector('.phase-number');
+      if (phaseElement) {
+        phaseElement.classList.add('animate-pulse', 'text-red-600');
+        setTimeout(() => {
+          phaseElement.classList.remove('animate-pulse', 'text-red-600');
+        }, 1000);
+      }
+      
+      setTimeout(() => {
+        setCurrentLevelIdx(prev => prev + 1);
+      }, 800);
+    }
   };
 
   return (
@@ -502,8 +686,25 @@ const App: React.FC = () => {
         >
           <p className="font-black text-[10px] md:text-sm uppercase leading-tight">
             FASE: <span 
-              className="text-xl md:text-2xl cursor-pointer hover:underline text-yellow-400 p-1" 
-              onClick={(e) => { e.stopPropagation(); handlePhaseCounterClick(); }}
+              className="text-xl md:text-2xl cursor-pointer hover:underline text-yellow-400 p-1 phase-number transition-all duration-300"
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                handlePhaseCounterClick(); 
+              }}
+              onMouseEnter={(e) => {
+                if (currentLevel.id === 9 && gameState === GameState.PLAYING) {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = 'scale(1.2)';
+                  el.style.textShadow = '0 0 10px red';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentLevel.id === 9 && gameState === GameState.PLAYING) {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = 'scale(1)';
+                  el.style.textShadow = 'none';
+                }
+              }}
             >
               {currentLevelIdx + 1}/{LEVELS.length}
             </span>
@@ -512,17 +713,17 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex flex-col gap-2 items-end">
-            <div className="bg-yellow-200 text-black p-1 md:p-2 border-2 border-black rotate-1 pointer-events-auto hidden md:block shadow-md">
-                <p className="text-[10px] md:text-[12px] font-bold">"DADA NÃO É NADA"</p>
-            </div>
-            {gameState === GameState.PLAYING && (
-                <button 
-                    onClick={() => setShowHelp(!showHelp)}
-                    className="bg-red-600 text-white px-4 py-2 border-4 border-black pointer-events-auto font-black text-sm shadow-[4px_4px_0px_white] hover:bg-black transition-all"
-                >
-                    {showHelp ? "VOLTAR" : "SOCORRO"}
-                </button>
-            )}
+          <div className="bg-yellow-200 text-black p-1 md:p-2 border-2 border-black rotate-1 pointer-events-auto hidden md:block shadow-md">
+            <p className="text-[10px] md:text-[12px] font-bold">"DADA NÃO É NADA"</p>
+          </div>
+          {gameState === GameState.PLAYING && (
+            <button 
+              onClick={() => setShowHelp(!showHelp)}
+              className="bg-red-600 text-white px-4 py-2 border-4 border-black pointer-events-auto font-black text-sm shadow-[4px_4px_0px_white] hover:bg-black transition-all"
+            >
+              {showHelp ? "VOLTAR" : "SOCORRO"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -573,84 +774,103 @@ const App: React.FC = () => {
           }}
         >
           <div className="mb-2 md:mb-6 text-center max-w-2xl bg-white p-2 border-2 border-black rotate-[-1deg] mx-2 shadow-md">
-             <div className="bg-black text-white px-4 py-1 mb-1">
-                <h2 className="text-xl md:text-3xl font-black uppercase tracking-widest leading-none">{currentLevel.title}</h2>
-             </div>
-             <p className="text-sm md:text-xl italic font-serif text-black font-bold">"{dadaQuote}"</p>
+            <div className="bg-black text-white px-4 py-1 mb-1">
+              <h2 className="text-xl md:text-3xl font-black uppercase tracking-widest leading-none">{currentLevel.title}</h2>
+            </div>
+            <p className="text-sm md:text-xl italic font-serif text-black font-bold">"{dadaQuote}"</p>
           </div>
 
           <div className="relative border-[8px] md:border-[16px] border-black shadow-[20px_20px_0px_rgba(0,0,0,0.2)] bg-white overflow-hidden max-w-[95vw]">
              
-             {showHelp && (
-                 <div className="absolute inset-0 bg-white z-[90] p-6 md:p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200">
-                     <h3 className="text-4xl md:text-6xl font-black text-black mb-6 uppercase border-b-8 border-black">O Oráculo Diz:</h3>
-                     <p className="text-xl md:text-3xl font-black leading-tight text-red-600 mb-10 bg-black p-4 inline-block">{currentLevel.solution}</p>
-                     <button onClick={() => setShowHelp(false)} className="bg-black text-white px-12 py-5 font-black uppercase text-2xl border-4 border-red-600 hover:bg-red-600 transition-colors">IGNORAR</button>
-                 </div>
-             )}
+            {showHelp && (
+              <div className="absolute inset-0 bg-white z-[90] p-6 md:p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200">
+                <h3 className="text-4xl md:text-6xl font-black text-black mb-6 uppercase border-b-8 border-black">O Oráculo Diz:</h3>
+                <p className="text-xl md:text-3xl font-black leading-tight text-red-600 mb-10 bg-black p-4 inline-block">{currentLevel.solution}</p>
+                <button onClick={() => setShowHelp(false)} className="bg-black text-white px-12 py-5 font-black uppercase text-2xl border-4 border-red-600 hover:bg-red-600 transition-colors">IGNORAR</button>
+              </div>
+            )}
 
-             {currentLevel.mechanic === 'GEMINI_SAYS' && (
-               <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-4 md:p-12 text-center text-white">
-                 <h3 className="text-3xl md:text-6xl font-black mb-4 text-yellow-400 uppercase">O Juiz de Tinta</h3>
-                 <p className="text-sm md:text-xl mb-6 italic">"O silêncio é uma arma branca. O que você tem a dizer?"</p>
-                 <input type="text" autoFocus value={playerInput} onChange={(e) => setPlayerInput(e.target.value)} className="w-full p-4 border-4 border-white text-xl md:text-3xl font-bold mb-6 bg-transparent text-white outline-none text-center" placeholder="..." />
-                 <button onClick={handleVerdictPredefined} disabled={isLoading} className="px-12 py-4 bg-white text-black text-2xl font-black hover:bg-red-600 transition-all uppercase">{isLoading ? "Processando..." : "ENVIAR"}</button>
-                 {dadaVerdict && <div className="mt-4 p-4 border-4 border-dashed border-white bg-red-900"><p className="text-xl md:text-2xl font-black">{dadaVerdict.reason}</p></div>}
-               </div>
-             )}
+            {currentLevel.mechanic === 'GEMINI_SAYS' && (
+              <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-4 md:p-12 text-center text-white">
+                <h3 className="text-3xl md:text-6xl font-black mb-4 text-yellow-400 uppercase">O Juiz de Tinta</h3>
+                <p className="text-sm md:text-xl mb-6 italic">"O silêncio é uma arma branca. O que você tem a dizer?"</p>
+                <input 
+                  type="text" 
+                  autoFocus 
+                  value={playerInput} 
+                  onChange={(e) => setPlayerInput(e.target.value)} 
+                  className="w-full p-4 border-4 border-white text-xl md:text-3xl font-bold mb-6 bg-transparent text-white outline-none text-center" 
+                  placeholder="..." 
+                />
+                <button onClick={handleVerdictPredefined} disabled={isLoading} className="px-12 py-4 bg-white text-black text-2xl font-black hover:bg-red-600 transition-all uppercase">
+                  {isLoading ? "Processando..." : "ENVIAR"}
+                </button>
+                {dadaVerdict && (
+                  <div className="mt-4 p-4 border-4 border-dashed border-white bg-red-900">
+                    <p className="text-xl md:text-2xl font-black">{dadaVerdict.reason}</p>
+                  </div>
+                )}
+              </div>
+            )}
 
-             <canvas 
-               ref={canvasRef} 
-               width={800} 
-               height={400} 
-               className="w-full h-auto aspect-[2/1] bg-white cursor-none"
-             />
+            <canvas 
+              ref={canvasRef} 
+              width={800} 
+              height={400} 
+              className="w-full h-auto aspect-[2/1] bg-white cursor-none"
+            />
 
-             {!isMobile && (
-                 <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
-                   style={{ 
-                     left: mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0) / (800 / (canvasRef.current?.clientWidth || 800)) - 20, 
-                     top: mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0) / (400 / (canvasRef.current?.clientHeight || 400)) - 20 
-                   }}
-                 >👁️‍🗨️</div>
-             )}
+            {!isMobile && (
+              <div className="fixed pointer-events-none z-[200] text-3xl md:text-5xl mix-blend-difference drop-shadow-lg"
+                style={{ 
+                  left: mouseRef.current.x + (canvasRef.current?.getBoundingClientRect().left || 0) / (800 / (canvasRef.current?.clientWidth || 800)) - 20, 
+                  top: mouseRef.current.y + (canvasRef.current?.getBoundingClientRect().top || 0) / (400 / (canvasRef.current?.clientHeight || 400)) - 20 
+                }}
+              >👁️‍🗨️</div>
+            )}
           </div>
 
           <div className="mt-4 md:mt-10 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 max-w-3xl w-full px-2">
             <div className="bg-white border-8 border-black p-4 md:p-6 rotate-1 shadow-[8px_8px_0px_black]">
-                <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">INSTRUÇÃO:</p>
-                <p className="text-sm md:text-lg font-bold text-black italic">{currentLevel.instruction}</p>
+              <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">INSTRUÇÃO:</p>
+              <p className="text-sm md:text-lg font-bold text-black italic">{currentLevel.instruction}</p>
             </div>
             <div className="bg-yellow-400 text-black border-8 border-black p-4 md:p-6 -rotate-1 shadow-[8px_8px_0px_black]">
-                <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">REGRA:</p>
-                <p className="text-[10px] md:text-sm font-black uppercase">{currentLevel.rule}</p>
+              <p className="font-black border-b-4 border-black mb-2 text-xl md:text-2xl">REGRA:</p>
+              <p className="text-[10px] md:text-sm font-black uppercase">{currentLevel.rule}</p>
             </div>
           </div>
         </div>
       )}
 
       {isMobile && gameState === GameState.PLAYING && (
-          <div className="fixed bottom-4 left-0 w-full flex justify-between px-6 z-[120] pointer-events-none">
-              <div className="flex gap-4 pointer-events-auto">
-                  <button 
-                    onTouchStart={() => handleTouchControl('TouchLeft', true)} 
-                    onTouchEnd={() => handleTouchControl('TouchLeft', false)} 
-                    className="w-16 h-16 bg-black/80 border-4 border-white text-white font-black text-3xl flex items-center justify-center active:bg-red-600 rounded-full"
-                  >←</button>
-                  <button 
-                    onTouchStart={() => handleTouchControl('TouchRight', true)} 
-                    onTouchEnd={() => handleTouchControl('TouchRight', false)} 
-                    className="w-16 h-16 bg-black/80 border-4 border-white text-white font-black text-3xl flex items-center justify-center active:bg-red-600 rounded-full"
-                  >→</button>
-              </div>
-              <div className="pointer-events-auto">
-                  <button 
-                    onTouchStart={() => handleTouchControl('TouchJump', true)} 
-                    onTouchEnd={() => handleTouchControl('TouchJump', false)} 
-                    className="w-20 h-20 bg-black/80 border-4 border-white text-white font-black text-xl flex items-center justify-center active:bg-blue-600 rounded-full uppercase"
-                  >PULO</button>
-              </div>
+        <div className="fixed bottom-4 left-0 w-full flex justify-between px-6 z-[120] pointer-events-none">
+          <div className="flex gap-4 pointer-events-auto">
+            <button 
+              onTouchStart={() => handleTouchControl('TouchLeft', true)} 
+              onTouchEnd={() => handleTouchControl('TouchLeft', false)} 
+              className={`w-16 h-16 border-4 border-white text-white font-black text-3xl flex items-center justify-center rounded-full transition-all ${
+                touchControls.left ? 'bg-red-600 scale-90' : 'bg-black/80'
+              }`}
+            >←</button>
+            <button 
+              onTouchStart={() => handleTouchControl('TouchRight', true)} 
+              onTouchEnd={() => handleTouchControl('TouchRight', false)} 
+              className={`w-16 h-16 border-4 border-white text-white font-black text-3xl flex items-center justify-center rounded-full transition-all ${
+                touchControls.right ? 'bg-red-600 scale-90' : 'bg-black/80'
+              }`}
+            >→</button>
           </div>
+          <div className="pointer-events-auto">
+            <button 
+              onTouchStart={() => handleTouchControl('TouchJump', true)} 
+              onTouchEnd={() => handleTouchControl('TouchJump', false)} 
+              className={`w-20 h-20 border-4 border-white text-white font-black text-xl flex items-center justify-center rounded-full uppercase transition-all ${
+                touchControls.jump ? 'bg-blue-600 scale-90' : 'bg-black/80'
+              }`}
+            >PULO</button>
+          </div>
+        </div>
       )}
 
       {gameState === GameState.WIN_TROLL && (
