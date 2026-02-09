@@ -46,4 +46,5 @@ export interface Entity {
   type: 'PLAYER' | 'PLATFORM' | 'GOAL' | 'TRAP' | 'BUTTON' | 'PROJECTILE';
   scale?: number;
   health?: number;
+  isSolid?: boolean; 
 }
