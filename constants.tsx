@@ -31,7 +31,7 @@ export const LEVELS: LevelConfig[] = [
     title: "Manifesto Inicial",
     instruction: "A direita é o destino inevitável.",
     rule: "O movimento é a única regra que não mentimos.",
-    solution: "Apenas ande para a direita e toque no portal vermelho.",
+    solution: "Sério isso? Apenas ande para a direita e toque no portal vermelho.",
     mechanic: 'NORMAL',
     bgColor: '#fdf6e3'
   },
