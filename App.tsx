@@ -1,4 +1,4 @@
-// App.tsx CORRIGIDO
+// App.tsx CORRIGIDO - Fases 4, 13, 14 e pulo
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GameState, LevelConfig, Entity } from './types';
 import { LEVELS, COLORS, DADA_RESPONSES } from './constants';
@@ -30,8 +30,9 @@ const App: React.FC = () => {
     right: false,
     jump: false
   });
-  const [canDoubleJump, setCanDoubleJump] = useState(false);
+  const [canDoubleJump, setCanDoubleJump] = useState(true);
   const [hasJumped, setHasJumped] = useState(false);
+  const [jumpCooldown, setJumpCooldown] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -75,7 +76,8 @@ const App: React.FC = () => {
     playerRef.current.width = 32;
     playerRef.current.height = 48;
     setHasJumped(false);
-    setCanDoubleJump(false);
+    setCanDoubleJump(true);
+    setJumpCooldown(false);
     projectilesRef.current = [];
     if (currentLevelIdx === 19) {
       setBossHealth(3);
@@ -113,7 +115,8 @@ const App: React.FC = () => {
     setShakeAmount(0);
     setGlitchActive(false);
     setHasJumped(false);
-    setCanDoubleJump(false);
+    setCanDoubleJump(true);
+    setJumpCooldown(false);
     projectilesRef.current = [];
     
     // Clear any existing intervals
@@ -127,32 +130,61 @@ const App: React.FC = () => {
       { x: 720, y: 280, width: 50, height: 100, color: COLORS.RED, vx: 0, vy: 0, type: 'GOAL' }
     ];
 
-    // MECÂNICAS CORRIGIDAS:
-
-    // Fase 6 (SIZE_SHIFT) - CORRIGIDA: Player fica grande e não passa por baixo
-    if (idx === 5) { // Fase 6
-      // Plataforma no meio que bloqueia player grande
+    // FASE 4 CORRIGIDA: GRAVITY_SWAP - Mais jogável
+    if (idx === 3) { // Fase 4
+      platforms[0] = { x: 0, y: 0, width: 800, height: 20, color: COLORS.INK, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true }; // Teto
+      platforms[1] = { x: 720, y: 50, width: 50, height: 100, color: COLORS.RED, vx: 0, vy: 0, type: 'GOAL' }; // Portal no teto
+      // Plataformas no "teto" para facilitar
+      platforms.push({ x: 200, y: 60, width: 100, height: 15, color: '#2a4d69', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+      platforms.push({ x: 450, y: 60, width: 100, height: 15, color: '#2a4d69', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+    }
+    
+    // FASE 6 (SIZE_SHIFT)
+    if (idx === 5) {
       platforms.push({ 
         x: 350, y: 340, width: 100, height: 40, color: '#2a4d69', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true 
       });
-      // Vão em cima da plataforma que só passa quando pequeno
       platforms[1] = { x: 720, y: 300, width: 50, height: 80, color: COLORS.RED, vx: 0, vy: 0, type: 'GOAL' };
     }
     
-    // Obstáculos básicos
-    if (idx >= 2 && idx !== 5 && idx !== 18) {
+    // FASE 13 (TIME_DILATION) - CORRIGIDA: Mais jogável
+    if (idx === 12) {
+      // Remove traps para facilitar
+      platforms[1] = { x: 750, y: 280, width: 30, height: 100, color: COLORS.RED, vx: 0, vy: 0, type: 'GOAL' }; // Portal menor
+      // Adiciona plataformas de ajuda
+      platforms.push({ x: 400, y: 350, width: 80, height: 15, color: '#d4a373', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+      platforms.push({ x: 600, y: 320, width: 80, height: 15, color: '#d4a373', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+    }
+    
+    // Obstáculos básicos (exceto nas fases específicas)
+    if (idx >= 2 && idx !== 3 && idx !== 5 && idx !== 12 && idx !== 13 && idx !== 18) {
       platforms.push({ 
         x: 300, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
       });
     }
     
-    if (idx >= 6 && idx !== 15 && idx !== 18) {
+    if (idx >= 6 && idx !== 12 && idx !== 13 && idx !== 15 && idx !== 18) {
       platforms.push({ 
         x: 500, y: 365, width: 60, height: 15, color: COLORS.TRAP, vx: 0, vy: 0, type: 'TRAP', isSolid: true 
       });
     }
     
-    // Fase 16 - Labirinto do Ócio
+    // FASE 14 (PHANTOM_PLATFORMS) - CORRIGIDA: Agora funciona
+    if (idx === 13) {
+      // Remove traps padrão
+      platforms.pop();
+      platforms.pop();
+      // Plataforma fantasma no meio
+      platforms.push({ 
+        x: 300, y: 320, width: 200, height: 20, color: COLORS.GOLD, vx: 0, vy: 0, type: 'PLATFORM', isSolid: false,
+        phantom: true
+      });
+      // Plataformas sólidas para ajudar
+      platforms.push({ x: 150, y: 350, width: 80, height: 15, color: '#2a4d69', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+      platforms.push({ x: 550, y: 300, width: 80, height: 15, color: '#2a4d69', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
+    }
+    
+    // FASE 16 - Labirinto do Ócio
     if (idx === 15) {
       platforms.push({ 
         x: 150, y: 280, width: 80, height: 20, color: '#d4a373', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true
@@ -165,7 +197,7 @@ const App: React.FC = () => {
       });
     }
     
-    // SHY_BUTTON - Botão foge do PLAYER, não do mouse
+    // SHY_BUTTON
     if (level.mechanic === 'SHY_BUTTON') {
       platforms.push({ 
         x: 400, y: 250, width: 40, height: 40, color: COLORS.BLUE, vx: 0, vy: 0, type: 'BUTTON', isSolid: false 
@@ -183,16 +215,8 @@ const App: React.FC = () => {
       });
     }
     
-    // PHANTOM_PLATFORMS
-    if (level.mechanic === 'PHANTOM_PLATFORMS') {
-      platforms.push({ 
-        x: 250, y: 300, width: 300, height: 20, color: COLORS.GOLD, vx: 0, vy: 0, type: 'PLATFORM', isSolid: true
-      });
-    }
-    
-    // GLITCH_MAZE - CORRIGIDA: Fase 18 agora é diferente da 19
+    // GLITCH_MAZE
     if (level.mechanic === 'GLITCH_MAZE') {
-      // Cria um labirinto com plataformas que aparecem/desaparecem
       const glitchPositions = [
         { x: 200, y: 320 }, { x: 350, y: 280 }, { x: 500, y: 240 },
         { x: 150, y: 200 }, { x: 300, y: 160 }, { x: 450, y: 120 }
@@ -213,9 +237,6 @@ const App: React.FC = () => {
         });
       });
       
-      // Adiciona vento nesta fase também
-      platforms.push({ x: 650, y: 320, width: 30, height: 60, color: '#63b3ed', vx: 0, vy: 0, type: 'PLATFORM', isSolid: true });
-      
       glitchIntervalRef.current = setInterval(() => {
         setGlitchActive(prev => !prev);
         entitiesRef.current.forEach((ent, index) => {
@@ -227,9 +248,8 @@ const App: React.FC = () => {
       }, 800);
     }
     
-    // Fase 19 - O Pulo do Niilista (WIND_AFFECTED + plataformas invisíveis)
+    // Fase 19 - O Pulo do Niilista (plataformas invisíveis + vento)
     if (idx === 18) {
-      // Plataformas invisíveis
       const invisiblePlatforms = [
         { x: 200, y: 320, width: 60, height: 15 },
         { x: 350, y: 270, width: 60, height: 15 },
@@ -381,9 +401,9 @@ const App: React.FC = () => {
     const level = LEVELS[currentLevelIdx];
     const speed = 5;
     
-    // Mecânica SIZE_SHIFT - CORRIGIDA: Agora funciona corretamente
+    // Mecânica SIZE_SHIFT
     if (level.mechanic === 'SIZE_SHIFT') {
-      const scaleTime = Math.floor(time / 1000) % 2; // Alterna a cada segundo
+      const scaleTime = Math.floor(time / 1000) % 2;
       if (scaleTime === 0) {
         p.scale = 0.6;
         p.width = 20;
@@ -408,7 +428,7 @@ const App: React.FC = () => {
     }
 
     let gravity = gravityInverted ? -0.4 : 0.4;
-    const jumpPower = gravityInverted ? 10 : -11;
+    const jumpPower = gravityInverted ? 12 : -13; // Pulo mais forte
 
     let moveX = 0;
     if (keysRef.current['ArrowLeft'] || keysRef.current['KeyA'] || keysRef.current['TouchLeft']) moveX -= 1;
@@ -417,9 +437,9 @@ const App: React.FC = () => {
 
     p.vx = moveX * speed;
     
-    // VENTO AFETADO - CORRIGIDO: Só nas fases 11 e 19
+    // VENTO AFETADO
     if (level.mechanic === 'WIND_AFFECTED' || currentLevelIdx === 18) {
-      p.vx -= 2.5; // Vento constante para esquerda
+      p.vx -= 2.5;
     }
     
     if (level.mechanic === 'MOVE_ONLY_IF_MOVE' && moveX === 0) {
@@ -429,37 +449,61 @@ const App: React.FC = () => {
 
     p.vy += gravity;
 
+    // FASE 13 (TIME_DILATION) - CORRIGIDA: Efeito mais suave
     let deltaMultiplier = 1;
     if (level.mechanic === 'TIME_DILATION') {
-      deltaMultiplier = Math.max(0.1, 1 - (p.x / 800));
+      // Efeito começa mais tarde e é menos severo
+      const slowStart = 400;
+      if (p.x > slowStart) {
+        const progress = (p.x - slowStart) / (800 - slowStart);
+        deltaMultiplier = Math.max(0.3, 1 - progress * 0.7);
+      }
     }
 
     p.x += p.vx * deltaMultiplier;
     p.y += p.vy * deltaMultiplier;
 
-    // SISTEMA DE PULO CORRIGIDO: Apenas 1 pulo no ar
+    // SISTEMA DE PULO MELHORADO: Pulo normal + 1 pulo no ar
     const onFloor = gravityInverted ? p.y <= 10 : p.y >= 330;
     
-    if (onFloor) {
+    // Verifica colisão com plataformas para ver se está no chão
+    let isOnPlatform = false;
+    entitiesRef.current.forEach(ent => {
+      if (ent.type === 'PLATFORM' && ent.isSolid) {
+        const touchingPlatform = p.x < ent.x + ent.width && 
+                                p.x + p.width > ent.x && 
+                                p.y + p.height >= ent.y - 1 && 
+                                p.y + p.height <= ent.y + 5;
+        if (touchingPlatform && p.vy >= 0) {
+          isOnPlatform = true;
+        }
+      }
+    });
+    
+    const isGrounded = onFloor || isOnPlatform;
+    
+    if (isGrounded) {
       setHasJumped(false);
       setCanDoubleJump(true);
+      setJumpCooldown(false);
     }
     
     const jumpPressed = keysRef.current['ArrowUp'] || keysRef.current['Space'] || keysRef.current['KeyW'] || keysRef.current['TouchJump'];
-    const jumpJustPressed = jumpPressed && !keysRef.current['_lastJump'];
     
-    if (jumpJustPressed) {
-      if (onFloor) {
+    if (jumpPressed && !jumpCooldown) {
+      if (isGrounded) {
         p.vy = jumpPower;
         setHasJumped(true);
+        setJumpCooldown(true);
+        setTimeout(() => setJumpCooldown(false), 300);
       } else if (canDoubleJump && !hasJumped) {
-        p.vy = jumpPower * 0.8; // Pulinho no ar mais fraco
+        p.vy = jumpPower * 0.9; // Pulo no ar quase tão bom quanto no chão
         setCanDoubleJump(false);
         setHasJumped(true);
+        setJumpCooldown(true);
+        setTimeout(() => setJumpCooldown(false), 300);
       }
     }
-    
-    keysRef.current['_lastJump'] = jumpPressed;
 
     // Boss Projectiles
     if (level.mechanic === 'BOSS_FIGHT' && Math.random() < 0.025) {
@@ -503,19 +547,29 @@ const App: React.FC = () => {
     // Screen boundaries
     if (p.x < 0) p.x = 0;
     if (p.x + p.width > 800) p.x = 800 - p.width;
-    if (p.y < -200 || p.y > 600) die();
+    
+    // Para gravidade invertida, limites diferentes
+    if (gravityInverted) {
+      if (p.y < -200) die();
+      if (p.y > 600) p.y = 600;
+    } else {
+      if (p.y < -200) p.y = -200;
+      if (p.y > 600) die();
+    }
 
-    // Mecânica PHANTOM_PLATFORMS - CORRIGIDA
+    // Mecânica PHANTOM_PLATFORMS - CORRIGIDA: Funciona agora
     if (level.mechanic === 'PHANTOM_PLATFORMS') {
       entitiesRef.current.forEach((ent, index) => {
-        if (ent.type === 'PLATFORM' && index >= 2) {
-          // Só colide se o player estiver caindo (vy > 0)
-          if (p.vy > 0) {
-            ent.isSolid = false;
-            ent.color = 'rgba(212, 163, 115, 0.3)';
-          } else {
+        if (ent.type === 'PLATFORM' && 'phantom' in ent) {
+          // Alterna entre sólida e fantasma baseado na posição Y do player
+          if (p.y > ent.y - 50 && p.y < ent.y + 50) {
+            // Quando player está perto, plataforma é sólida
             ent.isSolid = true;
             ent.color = COLORS.GOLD;
+          } else {
+            // Quando player está longe, plataforma é fantasma
+            ent.isSolid = false;
+            ent.color = 'rgba(212, 163, 115, 0.3)';
           }
         }
       });
@@ -523,33 +577,30 @@ const App: React.FC = () => {
 
     // Check collisions with entities
     entitiesRef.current.forEach((ent, index) => {
-      // SHY_BUTTON - CORRIGIDO: Foge do PLAYER, ajuda do MOUSE para pegar
+      // SHY_BUTTON
       if (ent.type === 'BUTTON' && level.mechanic === 'SHY_BUTTON') {
         const dx = ent.x + ent.width/2 - p.x;
         const dy = ent.y + ent.height/2 - p.y;
         const distToPlayer = Math.sqrt(dx*dx + dy*dy);
         
-        // Foge do player se estiver perto
-        if (distToPlayer < 150) {
-          ent.x += (dx/distToPlayer) * 8;
-          ent.y += (dy/distToPlayer) * 8;
+        if (distToPlayer < 120) {
+          ent.x += (dx/distToPlayer) * 6;
+          ent.y += (dy/distToPlayer) * 6;
         }
         
-        // Atrai com o mouse se estiver perto
         const dxMouse = ent.x + ent.width/2 - mouseRef.current.x;
         const dyMouse = ent.y + ent.height/2 - mouseRef.current.y;
         const distToMouse = Math.sqrt(dxMouse*dxMouse + dyMouse*dyMouse);
         
-        if (distToMouse < 100) {
-          ent.x -= (dxMouse/distToMouse) * 5;
-          ent.y -= (dyMouse/distToMouse) * 5;
+        if (distToMouse < 80) {
+          ent.x -= (dxMouse/distToMouse) * 4;
+          ent.y -= (dyMouse/distToMouse) * 4;
         }
         
-        // Mantém dentro da tela
-        if (ent.x < 0) ent.x = 0;
-        if (ent.x > 760) ent.x = 760;
-        if (ent.y < 0) ent.y = 0;
-        if (ent.y > 360) ent.y = 360;
+        if (ent.x < 100) ent.x = 100;
+        if (ent.x > 700) ent.x = 700;
+        if (ent.y < 100) ent.y = 100;
+        if (ent.y > 300) ent.y = 300;
       }
 
       const isColliding = p.x < ent.x + ent.width && 
@@ -558,23 +609,15 @@ const App: React.FC = () => {
                          p.y + p.height > ent.y;
       
       if (isColliding) {
-        if (ent.type === 'PLATFORM') {
-          let shouldCollide = ent.isSolid !== false;
-          
-          if (level.mechanic === 'GLITCH_MAZE') {
-            shouldCollide = glitchActive ? ent.isSolid : true;
-          }
-          
-          if (shouldCollide) {
-            if (p.vy > 0 && p.y < ent.y) { 
-              p.y = ent.y - p.height; 
-              p.vy = 0;
-              setHasJumped(false);
-              setCanDoubleJump(true);
-            } else if (p.vy < 0 && p.y > ent.y) { 
-              p.y = ent.y + ent.height; 
-              p.vy = 0;
-            }
+        if (ent.type === 'PLATFORM' && ent.isSolid) {
+          if (p.vy > 0 && p.y < ent.y) { 
+            p.y = ent.y - p.height; 
+            p.vy = 0;
+            setHasJumped(false);
+            setCanDoubleJump(true);
+          } else if (p.vy < 0 && p.y > ent.y) { 
+            p.y = ent.y + ent.height; 
+            p.vy = 0;
           }
         }
         
@@ -584,7 +627,6 @@ const App: React.FC = () => {
         }
         
         if (ent.type === 'GOAL' && doorOpen && level.id !== 9 && level.mechanic !== 'DUAL_CONTACT') {
-          // SIZE_SHIFT - CORRIGIDO: Só passa quando pequeno
           if (level.mechanic === 'SIZE_SHIFT') {
             if (p.scale && p.scale < 0.7) {
               if (currentLevelIdx === LEVELS.length - 1) {
@@ -648,7 +690,7 @@ const App: React.FC = () => {
 
     draw();
     requestRef.current = requestAnimationFrame(update);
-  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake, glitchActive, hasJumped, canDoubleJump]);
+  }, [gameState, currentLevelIdx, doorOpen, die, gravityInverted, bossLastHitTime, triggerShake, glitchActive, hasJumped, canDoubleJump, jumpCooldown]);
 
   const draw = () => {
     const canvas = canvasRef.current;
@@ -660,20 +702,33 @@ const App: React.FC = () => {
     ctx.fillStyle = currentLevel.bgColor || COLORS.PAPER;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Desenha indicador de vento para fases com vento
+    // Desenha indicador de vento
     if (currentLevel.mechanic === 'WIND_AFFECTED' || currentLevelIdx === 18) {
-      for (let i = 0; i < 20; i++) {
-        const x = 50 + i * 40;
+      for (let i = 0; i < 15; i++) {
+        const x = 50 + i * 50;
         const y = 50 + Math.sin(Date.now() / 500 + i) * 20;
-        ctx.fillStyle = 'rgba(99, 179, 237, 0.5)';
+        ctx.fillStyle = 'rgba(99, 179, 237, 0.6)';
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.lineTo(x - 20, y);
-        ctx.lineTo(x - 15, y - 5);
-        ctx.moveTo(x - 20, y);
-        ctx.lineTo(x - 15, y + 5);
+        ctx.lineTo(x - 15, y);
+        ctx.lineTo(x - 10, y - 4);
+        ctx.moveTo(x - 15, y);
+        ctx.lineTo(x - 10, y + 4);
         ctx.stroke();
       }
+    }
+
+    // Indicador de TIME_DILATION
+    if (currentLevel.mechanic === 'TIME_DILATION') {
+      const slowProgress = Math.max(0, (playerRef.current.x - 400) / 400);
+      ctx.fillStyle = `rgba(139, 0, 0, ${0.3 + slowProgress * 0.4})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Texto indicador
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 16px Courier';
+      ctx.textAlign = 'center';
+      ctx.fillText(`VELOCIDADE: ${Math.round((1 - slowProgress * 0.7) * 100)}%`, 400, 30);
     }
 
     // Draw entities
@@ -718,6 +773,12 @@ const App: React.FC = () => {
         ctx.restore();
       } else if (ent.type === 'PLATFORM') {
         if (ent.color !== 'transparent') {
+          // Plataforma fantasma pisca
+          if (currentLevel.mechanic === 'PHANTOM_PLATFORMS' && !ent.isSolid) {
+            const alpha = 0.2 + Math.sin(Date.now() / 300) * 0.2;
+            ctx.globalAlpha = alpha;
+          }
+          
           ctx.fillStyle = ent.color;
           ctx.fillRect(ent.x, ent.y, ent.width, ent.height);
           
@@ -729,7 +790,7 @@ const App: React.FC = () => {
               ctx.strokeRect(ent.x, ent.y, ent.width, ent.height);
               ctx.setLineDash([]);
             }
-          } else {
+          } else if (!(currentLevel.mechanic === 'PHANTOM_PLATFORMS' && !ent.isSolid)) {
             ctx.strokeStyle = '#fff'; 
             ctx.lineWidth = 1;
             ctx.beginPath(); 
@@ -737,6 +798,8 @@ const App: React.FC = () => {
             ctx.lineTo(ent.x + ent.width, ent.y + ent.height/2); 
             ctx.stroke();
           }
+          
+          ctx.globalAlpha = 1.0;
         }
       } else if (ent.type === 'TRAP') {
         ctx.fillStyle = ent.color;
@@ -791,11 +854,16 @@ const App: React.FC = () => {
     }
     
     // Indicador de pulo
-    if (!canDoubleJump && hasJumped) {
+    if (canDoubleJump && !hasJumped) {
+      ctx.fillStyle = '#00ff00';
+      ctx.font = 'bold 10px Courier';
+      ctx.textAlign = 'center';
+      ctx.fillText('2 PULOS', 0, p.height/2 + 15);
+    } else if (!canDoubleJump && hasJumped) {
       ctx.fillStyle = '#ff5555';
       ctx.font = 'bold 10px Courier';
       ctx.textAlign = 'center';
-      ctx.fillText('SEM PULO', 0, p.height/2 + 15);
+      ctx.fillText('1 PULO', 0, p.height/2 + 15);
     }
     
     ctx.restore();
