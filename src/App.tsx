@@ -36,6 +36,95 @@ export default function App() {
     return saved ? parseInt(saved) : 0;
   });
 
+  const [absurdElements, setAbsurdElements] = useState<{ id: number; x: number; y: number; vx: number; vy: number; emoji: string; rotation: number; rv: number }[]>([]);
+  const nextAbsurdId = useRef(0);
+
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const initAudio = () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+  };
+
+  const playSound = (type: 'jump' | 'death' | 'transform' | 'glitch' | 'wind' | 'win') => {
+    if (!audioCtxRef.current) return;
+    const ctx = audioCtxRef.current;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+
+    if (type === 'jump') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.exponentialRampToValueAtTime(400, now + 0.1);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    } else if (type === 'death') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === 'transform') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.linearRampToValueAtTime(880, now + 0.2);
+      osc.frequency.linearRampToValueAtTime(440, now + 0.4);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === 'glitch') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(Math.random() * 1000 + 100, now);
+      gain.gain.setValueAtTime(0.05, now);
+      gain.gain.setValueAtTime(0, now + 0.05);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } else if (type === 'wind') {
+      // Noise-like sound
+      const bufferSize = ctx.sampleRate * 0.5;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(400, now);
+      filter.frequency.exponentialRampToValueAtTime(1000, now + 0.5);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.gain.setValueAtTime(0.05, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.5);
+      noise.start(now);
+      noise.stop(now + 0.5);
+    } else if (type === 'win') {
+      osc.type = 'sine';
+      [261.63, 329.63, 392.00, 523.25].forEach((freq, i) => {
+        const t = now + i * 0.1;
+        osc.frequency.setValueAtTime(freq, t);
+      });
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.5);
+      osc.start(now);
+      osc.stop(now + 0.5);
+    }
+  };
+
   const [dadaQuote, setDadaQuote] = useState("Dada não significa nada.");
   const [userInput, setUserInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -98,6 +187,7 @@ export default function App() {
 
   const resetPlayer = useCallback(() => {
     setDeaths(d => d + 1);
+    playSound('death');
     playerRef.current.x = 50;
     playerRef.current.y = isGravityInverted ? 50 : 300;
     playerRef.current.vx = 0;
@@ -255,6 +345,7 @@ export default function App() {
 
         if (isMouseOverGoal && isPlayerOverGoal) {
           triggerShake(5);
+          playSound('win');
           goal.color = COLORS.GOLD;
           setTimeout(() => {
             if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
@@ -295,7 +386,11 @@ export default function App() {
 
     // Mechanics
     if (level.mechanic === "SIZE_SHIFT") {
-      if (Math.floor(time / 1000) % 2 === 0) {
+      const isSmall = Math.floor(time / 1000) % 2 === 0;
+      const wasSmall = player.scale && player.scale < 1;
+      if (isSmall !== wasSmall) playSound('transform');
+      
+      if (isSmall) {
         player.scale = 0.6;
         player.width = 20;
         player.height = 30;
@@ -312,8 +407,9 @@ export default function App() {
     }
 
     if (level.mechanic === "GRAVITY_TICK") {
-      if (Math.floor(time / 1500) % 2 === 0) setIsGravityInverted(false);
-      else setIsGravityInverted(true);
+      const nextInverted = Math.floor(time / 1500) % 2 !== 0;
+      if (nextInverted !== isGravityInverted) playSound('glitch');
+      setIsGravityInverted(nextInverted);
     }
 
     let gravity = isGravityInverted ? -0.4 : 0.4;
@@ -369,6 +465,7 @@ export default function App() {
         player.vy = jumpForce;
         setIsJumping(true);
         setIsFalling(true);
+        playSound('jump');
         if (level.mechanic === "GRAVITY_ON_JUMP") setIsGravityInverted(prev => !prev);
         setTimeout(() => setIsFalling(false), 300);
       } else if (canDoubleJump && !isJumping) {
@@ -376,10 +473,38 @@ export default function App() {
         setCanDoubleJump(false);
         setIsJumping(true);
         setIsFalling(true);
+        playSound('jump');
         if (level.mechanic === "GRAVITY_ON_JUMP") setIsGravityInverted(prev => !prev);
         setTimeout(() => setIsFalling(false), 300);
       }
     }
+
+    // Absurd Elements Spawning
+    if (Math.random() < 1/500) {
+      const emojis = ["🐟", "👢", "🎩", "🍌", "🎷", "👁️", "🚲", "☕"];
+      const newElement = {
+        id: nextAbsurdId.current++,
+        x: Math.random() * 800,
+        y: Math.random() * 400,
+        vx: (Math.random() - 0.5) * 4,
+        vy: (Math.random() - 0.5) * 4,
+        emoji: emojis[Math.floor(Math.random() * emojis.length)],
+        rotation: 0,
+        rv: (Math.random() - 0.5) * 0.2
+      };
+      setAbsurdElements(prev => [...prev, newElement]);
+      setTimeout(() => {
+        setAbsurdElements(prev => prev.filter(el => el.id !== newElement.id));
+      }, 3000);
+    }
+
+    // Update Absurd Elements
+    setAbsurdElements(prev => prev.map(el => ({
+      ...el,
+      x: el.x + el.vx,
+      y: el.y + el.vy,
+      rotation: el.rotation + el.rv
+    })));
 
     // Boss fight projectiles
     if (level.mechanic === "BOSS_FIGHT" && Math.random() < 0.025) {
@@ -449,9 +574,11 @@ export default function App() {
     if (level.mechanic === "PHANTOM_PLATFORMS") {
       objectsRef.current.forEach(obj => {
         if (obj.type === "PLATFORM" && "phantom" in obj) {
+          const wasSolid = obj.isSolid;
           if (player.y > obj.y - 50 && player.y < obj.y + 50) {
             obj.isSolid = true;
             obj.color = COLORS.GOLD;
+            if (!wasSolid) playSound('glitch');
           } else {
             obj.isSolid = false;
             obj.color = "rgba(212, 163, 115, 0.3)";
@@ -508,6 +635,7 @@ export default function App() {
         if (obj.type === "GOAL" && isGoalActive && level.id !== 9 && level.mechanic !== "DUAL_CONTACT") {
           if (level.mechanic === "SIZE_SHIFT") {
             if (player.scale && player.scale < 0.7) {
+              playSound('win');
               if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
               else setCurrentLevelIdx(p => p + 1);
             } else {
@@ -522,6 +650,7 @@ export default function App() {
                 const newH = h - 1;
                 triggerShake(15);
                 if (newH <= 0) {
+                  playSound('win');
                   setTimeout(() => setGameState(GameState.WIN_TROLL), 1000);
                 } else {
                   obj.x = Math.random() * 400 + 200;
@@ -535,6 +664,7 @@ export default function App() {
               });
             }
           } else {
+            playSound('win');
             if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
             else setCurrentLevelIdx(p => p + 1);
           }
@@ -570,6 +700,7 @@ export default function App() {
 
     // Wind effect
     if (currentLevel.mechanic === "WIND_AFFECTED" || currentLevelIdx === 18) {
+      if (Math.random() < 0.05) playSound('wind');
       for (let i = 0; i < 15; i++) {
         const x = 50 + i * 50;
         const y = 50 + Math.sin(Date.now() / 500 + i) * 20;
@@ -680,6 +811,18 @@ export default function App() {
       ctx.fill();
     });
 
+    // Absurd Elements
+    absurdElements.forEach(el => {
+      ctx.save();
+      ctx.translate(el.x, el.y);
+      ctx.rotate(el.rotation);
+      ctx.font = "40px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(el.emoji, 0, 0);
+      ctx.restore();
+    });
+
     // Player
     const p = playerRef.current;
     ctx.save();
@@ -703,17 +846,6 @@ export default function App() {
       ctx.fillText(p.scale && p.scale < 1 ? "PEQUENO" : "GRANDE", 0, -p.height / 2 - 15);
     }
     
-    if (canDoubleJump && !isJumping) {
-      ctx.fillStyle = "#00ff00";
-      ctx.font = "bold 10px Courier";
-      ctx.textAlign = "center";
-      ctx.fillText("2 PULOS", 0, p.height / 2 + 15);
-    } else if (!canDoubleJump && isJumping) {
-      ctx.fillStyle = "#ff5555";
-      ctx.font = "bold 10px Courier";
-      ctx.textAlign = "center";
-      ctx.fillText("1 PULO", 0, p.height / 2 + 15);
-    }
     ctx.restore();
   };
 
@@ -725,6 +857,7 @@ export default function App() {
   }, [gameLoop]);
 
   const selectLevel = (idx: number) => {
+    initAudio();
     if (idx <= maxLevelReached) {
       setCurrentLevelIdx(idx);
       setGameState(GameState.PLAYING);
@@ -741,6 +874,7 @@ export default function App() {
       setJudgeResponse({ allow: true, reason: DADA_QUOTES[Math.floor(Math.random() * DADA_QUOTES.length)] });
       setIsProcessing(false);
       setTimeout(() => {
+        playSound('win');
         if (currentLevelIdx === LEVELS.length - 1) setGameState(GameState.WIN_TROLL);
         else setCurrentLevelIdx(prev => prev + 1);
       }, 1500);
@@ -750,6 +884,7 @@ export default function App() {
   const handlePhaseClick = () => {
     if (currentLevel.id === 9 && gameState === GameState.PLAYING) {
       triggerShake(8);
+      playSound('win');
       const el = document.querySelector(".phase-number");
       if (el) {
         el.classList.add("animate-pulse", "text-red-600");
@@ -764,7 +899,11 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-2 md:p-4 relative overflow-hidden select-none touch-none">
+    <div 
+      onMouseDown={initAudio}
+      onTouchStart={initAudio}
+      className="min-h-screen flex flex-col items-center justify-center p-2 md:p-4 relative overflow-hidden select-none touch-none"
+    >
       {/* Header UI */}
       <div className="fixed top-0 left-0 w-full p-2 md:p-4 flex justify-between items-start z-[100] pointer-events-none">
         <div 
