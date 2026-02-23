@@ -1,8 +1,5 @@
-
 {
   "name": "DADA-Troll: O Anti-Jogo",
-  "description": "Um jogo plataforma surrealista dadaísta onde a lógica é o inimigo. Inspirado em 'That Level Again'. Tente vencer fases que não querem ser vencidas.",
-  "requestFramePermissions": [
-    "microphone"
-  ]
+  "description": "Um anti-jogo dadaísta onde a lógica é sua inimiga e o absurdo é o único caminho.",
+  "requestFramePermissions": []
 }
