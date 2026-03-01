@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gigante branco leproso · dadaísmo tropical</title>
+    <style>
+        /* base dada — ruído, fragmento, colagem */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #f7f2e6;  /* papel envelhecido */
+            background-image: 
+                linear-gradient(45deg, rgba(200, 180, 150, 0.1) 25%, transparent 25%),
+                linear-gradient(-45deg, rgba(160, 130, 100, 0.08) 25%, transparent 25%);
+            background-size: 40px 40px;
+            font-family: 'Courier New', Courier, 'Times New Roman', serif;
+            color: #1a1a1a;
+            line-height: 1.5;
+            padding: 2rem 1rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* envelope principal — como uma folha rasgada */
+        .poema-container {
+            max-width: 780px;
+            width: 100%;
+            background: rgba(250, 245, 235, 0.85);
+            backdrop-filter: blur(1px);
+            border: 4px solid #2b2b2b;
+            box-shadow: 15px 15px 0 rgba(0,0,0,0.15), inset 0 0 0 2px #e4d5c0;
+            padding: 3rem 2.5rem;
+            position: relative;
+            transition: all 0.2s ease;
+            word-wrap: break-word;
+        }
+
+        /* manchas / acidentes */
+        .poema-container::before {
+            content: "";
+            position: absolute;
+            top: -10px; left: -10px;
+            width: 120px; height: 120px;
+            background: radial-gradient(circle, rgba(220,190,160,0.4) 0%, transparent 70%);
+            mix-blend-mode: multiply;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .poema-container::after {
+            content: "⚡⚡⚡";
+            position: absolute;
+            bottom: 20px; right: 25px;
+            font-size: 2.2rem;
+            color: #b34141;
+            opacity: 0.2;
+            font-family: 'Impact', fantasy;
+            transform: rotate(8deg);
+            letter-spacing: -4px;
+        }
+
+        /* título monstruoso */
+        h1 {
+            font-size: 3.2rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: -0.02em;
+            line-height: 1;
+            color: #e0dcd0;
+            background-color: #3d2e22;
+            display: inline-block;
+            padding: 0.5rem 1.8rem 0.8rem 0.8rem;
+            margin: 0 0 3rem -2rem;
+            border: 5px solid #1e1a16;
+            box-shadow: 12px 12px 0 #aa9f91;
+            text-shadow: 2px 2px 0 #734c3b, 4px 4px 0 #a77b5f;
+            word-break: break-word;
+            transform: rotate(-1deg);
+            font-family: 'Arial Black', 'Franklin Gothic Heavy', sans-serif;
+        }
+
+        /* versos — cada bloco vira um quase objeto */
+        p {
+            font-size: 1.3rem;
+            margin-bottom: 2.2rem;
+            position: relative;
+            z-index: 5;
+            font-family: 'Courier New', monospace;
+            background: rgba(255, 255, 240, 0.3);
+            padding: 0.6rem 0.2rem 0.6rem 1.2rem;
+            border-left: 12px solid #6b4f3a;
+            border-bottom: 2px dashed #bbaa99;
+            transition: 0.1s linear;
+        }
+
+        /* intervenções dada: recortes, cores, fontes loucas */
+        .ruido-1 {
+            font-family: 'Impact', 'Arial Black', sans-serif;
+            font-size: 2rem;
+            color: #b64545;
+            text-transform: uppercase;
+            display: inline-block;
+            background: #c8c8a0;
+            padding: 0 0.5rem;
+            border: 4px dotted #2c2c2c;
+            transform: scale(1.02) rotate(-1deg);
+            margin: 0 0.2rem;
+        }
+
+        .ruido-2 {
+            font-family: 'Georgia', serif;
+            font-size: 1.5rem;
+            font-style: italic;
+            background: #d1c7b3;
+            padding: 0.2rem 0.6rem;
+            border: 3px solid #987b5b;
+            box-shadow: inset 0 0 0 2px #efefd0;
+            color: #2e1f15;
+        }
+
+        .gritado {
+            font-weight: 900;
+            font-size: 2.4rem;
+            letter-spacing: 0.2rem;
+            background: #fde9c9;
+            color: #b32e2e;
+            text-decoration: wavy underline #a55 2px;
+            text-transform: uppercase;
+            display: inline-block;
+            transform: rotate(0.5deg);
+            padding: 0 0.3rem;
+            border-radius: 30% 10% 30% 10%;
+        }
+
+        .fonemas {
+            font-family: 'Brush Script MT', cursive, sans-serif;
+            font-size: 2.8rem;
+            font-weight: 100;
+            background: #eddbbf;
+            display: inline-block;
+            padding: 0 1rem;
+            border: 6px double #401010;
+            color: #1d0f0f;
+            word-break: break-all;
+            box-shadow: -7px 7px 0 #aaaaaa;
+            margin: 0.5rem 0;
+            line-height: 1.3;
+        }
+
+        .esponja {
+            background: #2d2d2d;
+            color: #faf2cf;
+            font-family: 'Stencil Two', fantasy;
+            font-size: 2.3rem;
+            padding: 0.3rem 1rem;
+            border-radius: 200px 20px 200px 20px;
+            border: 3px solid #bc8f4b;
+            display: inline-block;
+            transform: skewX(-5deg);
+        }
+
+        .palhaco {
+            background: repeating-linear-gradient(45deg, #f0d0a0, #f0d0a0 10px, #c0b090 10px, #c0b090 20px);
+            color: #101418;
+            font-size: 1.9rem;
+            font-weight: bold;
+            padding: 0.2rem 1rem;
+            border: 5px dashed #c24f4f;
+            font-family: 'Comic Sans MS', cursive, sans-serif;
+            text-shadow: 2px 2px 0 #b5b5b5;
+        }
+
+        .navio {
+            font-size: 2.5rem;
+            background: #596673;
+            color: #f4e9d2;
+            padding: 0 0.8rem;
+            border: 6px ridge #121212;
+            font-family: 'Arial Narrow', sans-serif;
+            text-transform: lowercase;
+        }
+
+        .rrrr {
+            font-size: 4rem;
+            font-weight: 900;
+            color: #6e2323;
+            background: #c2b59b;
+            display: inline-block;
+            padding: 0.4rem 1rem 0rem 1rem;
+            letter-spacing: 25px;
+            border: 10px double #402020;
+            line-height: 1;
+            margin: 0.3rem 0;
+            word-break: break-all;
+        }
+
+        .nbaze {
+            font-family: 'Courier New', monospace;
+            font-size: 3.5rem;
+            background: #3e3229;
+            color: #f1e1b0;
+            padding: 0.2rem 1.2rem;
+            border-left: 20px solid #b5835a;
+            border-right: 20px solid #b5835a;
+            display: inline-block;
+            transform: rotate(0.7deg);
+        }
+
+        .coroa-alga {
+            background: radial-gradient(circle at 30% 30%, #e2c87b, #26735c);
+            color: #ffefc0;
+            font-size: 2.2rem;
+            font-style: oblique;
+            padding: 0 2rem;
+            border: 3px dotted #d4d49b;
+            text-shadow: -2px -2px 0 #2f543b;
+            display: inline-block;
+        }
+
+        /* leitor caolho / grito */
+        .grito-leitor {
+            background: #300;
+            color: #fdb;
+            font-size: 2.2rem;
+            font-family: 'Verdana', sans-serif;
+            font-weight: 900;
+            padding: 0.6rem 1rem;
+            border: 8px solid #a55;
+            outline: 4px solid #daa;
+            transform: rotate(-2deg) scale(1.02);
+            box-shadow: 0 0 0 6px #fcd492;
+            margin: 1rem 0;
+            text-transform: uppercase;
+        }
+
+        /* tesoura multipla */
+        .tesoura-efeito {
+            font-size: 2.7rem;
+            background: #ae7f6b;
+            color: #ebdbca;
+            padding: 0.3rem 1rem;
+            border: 5px solid #a53a3a;
+            border-style: groove dashed dashed groove;
+            font-family: 'Impact', fantasy;
+            text-decoration: line-through double #fa0;
+            word-break: break-all;
+        }
+
+        /* miolos que se vão */
+        .hiperbole {
+            background: #e1d9c0;
+            color: #041f33;
+            font-size: 1.9rem;
+            border: 8px solid #384e4e;
+            border-top: 20px solid #545454;
+            padding: 1rem;
+            font-family: 'Times', serif;
+            transform: skewX(3deg);
+        }
+
+        /* rodapé à deriva */
+        .assinatura-visual {
+            margin-top: 4rem;
+            text-align: right;
+            font-size: 1.5rem;
+            border-top: 7px double #6b4f3a;
+            padding-top: 2rem;
+            font-family: 'Courier New', monospace;
+            background: #fffbe6;
+            color: #2d2d2d;
+            padding: 1.2rem;
+            border-right: 12px solid #ab8b71;
+            transform: rotate(-0.3deg);
+        }
+        .assinatura-visual span {
+            background: black;
+            color: white;
+            padding: 0.2rem 0.8rem;
+            font-size: 2.8rem;
+        }
+
+        /* pequenas quebras de linha onomatopeicas */
+        .quebra-ganga {
+            display: block;
+            margin: 1rem 0 1rem 2rem;
+            font-size: 2.2rem;
+            background: #e0cfb1;
+            border: 3px solid #7f695a;
+            width: fit-content;
+            padding: 0 1rem;
+        }
+
+        hr {
+            border: none;
+            border-top: 12px dotted #9a897a;
+            margin: 2rem 0;
+        }
+    </style>
+</head>
+<body>
+<div class="poema-container">
+
+    <h1>O GIGANTE BRANCO<br>LEPROSO DA PAISAGEM</h1>
+
+    <p>o sal se agrupa em constelação de pássaros sobre o tumor de zuarte</p>
+
+    <p>em seus pulmões as asterídeas e os percevejos se balançam<br>
+    os micróbios se cristalizam em palmeiras de músculos balanços <span class="ruido-1">bomdia sem cigarro</span> tzantzantza ganga</p>
+
+    <p class="fonemas">bouzdouc zdouc ñfunfa mbaah mbaah ñfunfa</p>
+
+    <p><span class="esponja">macrocystis pyrifera</span> abraçar os barcos cirurgião dos barcos cicatriz úmida própria<br>
+    preguiça das luzes brilhantes<br>
+    os barcos <span class="ruido-2">ñfunfa ñfunfa ñfunfa</span><br>
+    eu ele forço as velas nas orelhas trupànfah helicon e boxeador na varanda o violino do hotel em baobás de chamas e chamas se desenvolvem em formação de esponjas</p>
+
+    <p>as chamas são esponjas <span class="ruido-1">b^bob^bo</span> e bateis<br>
+    as escalas sobem como o sangue <span class="ruido-2">bbôbê</span><br>
+    as samambaias nas estepes de lã meu acaso nas cascatas<br>
+    as chamas esponjas de vidro os palhaços feridos <span class="palhaco">palhaços</span><br>
+    os palhaços tombam <span class="fonemas">wancanca rá bzdouc</span> as brabuleta</p>
+
+    <p><span class="tesoura-efeito">as tesoura as tesoura as tesoura e as sombras<br>
+    as tesoura e as nuvens as tesoura os navios</span></p>
+
+    <p>o termômetro contempla o ultra-rubro <span class="gritado">gmbabàba</span><br>
+    berta minha educação meu rabo é frio e monocromático mfuá luá là<br>
+    os cogumelos laranja e a família de sons d’além do estibordo à origem à origem o triângulo e a árvore dos viajantes à origem</p>
+
+    <p class="hiperbole">meus miolos se vão verso a hipérbole<br>
+    o caulim formiga em sua caixa craniana<br>
+    dalibouli obok e tombo e tombo seu ventre é um grosso caixa aqui intervém o tambor maior e o chocalho</p>
+
+    <p>pois há ziguezagues sobre sua alma e bastantes <span class="rrrr">rrrrrrrrrrrrrr</span> aqui o leitor começa a gritar ele começa a gritar começa a gritar pois em seu grito tem as flautas que se multiplicam – os corais</p>
+
+    <div class="grito-leitor">o leitor quer morrer talvez ou dançar e começar a gritar<br>ele é um refino idiota porco ele não compreende meus versos e grita<br>ele é caolho</div>
+
+    <p>há ziguezagues sobre sua alma e bastantes <span class="rrrr">rrrrrrrrrrrrrr</span></p>
+
+    <p><span class="nbaze">nbaze baze baze</span> olhai a <span class="coroa-alga">coroa submarinha</span> que se desata em algas d’ouro<br>
+    hozondrac temor<br>
+    <span class="fonemas" style="font-size:3rem;">nfunda nbabàba nfoùnda tata nbabàba</span></p>
+
+    <!-- fragmento extra: repetição de ruído visual dada -->
+    <hr>
+    <div class="assinatura-visual">
+        <span>⚡ tzantzantza ⚡</span> bouzdouc zdouc … <span style="background:#c09c7a;">mfuá luá</span>
+    </div>
+</div>
+</body>
+</html>
